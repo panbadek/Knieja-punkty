@@ -25,6 +25,9 @@ const canMeldowac = () => ["szeregowy", "zastepowy"].includes(rola());     // me
 const quarter = () => S.cfg.kwartaly[S.q] || S.cfg.kwartaly[0];
 const inQ = d => d >= quarter().start && d <= quarter().end;
 const err = e => alert("Błąd: " + (e?.message || e));
+const kto = (imie, uid) => imie || S.users.find(u => u.id === uid)?.imie || (uid ? "kadra" : "–");
+const ktoKiedy = (imie, uid, ts) => `${esc(kto(imie, uid))}${ts ? `<div class="mut">${plTs(ts)}</div>` : ""}`;
+const myName = () => S.profile?.imie || loginOf(S.user?.email);
 const DAY_MS = 86400000;
 
 // ---------- dane na żywo
@@ -43,7 +46,7 @@ onAuthStateChanged(auth, async u => {
     const ref = doc(db, "users", u.uid);
     try {
       const s = await getDoc(ref);
-      if (!s.exists()) await setDoc(ref, { email: u.email, imie: loginOf(u.email), rola: "brak", zastep: S.regZastep || "" });
+      if (!s.exists()) await setDoc(ref, { email: u.email, imie: S.regName || loginOf(u.email), rola: "brak", zastep: "" });
     } catch (e) { console.warn(e); }
     profUnsub = onSnapshot(ref, d => { S.profile = d.data() || null;
       if (isKadra() && !usersUnsub) usersUnsub = onSnapshot(collection(db, "users"), s => { S.users = s.docs.map(d => ({ id: d.id, ...d.data() })); refresh(); });
@@ -83,14 +86,11 @@ const binders = {};
 // ---------- logowanie
 function vLogin() {
   return `<div class="card"><h2>Logowanie</h2>
-  <div class="row"><input id="em" placeholder="login" autocomplete="username" autocapitalize="none" spellcheck="false"></div>
-  <div class="row"><input id="pw" type="password" placeholder="hasło (min. 6 znaków)" autocomplete="current-password"></div>
-  <div class="row"><button class="pri" id="li">Zaloguj</button></div>
-  <h3>Nie masz konta?</h3>
-  <div class="row"><select id="rz"><option value="">– Twój zastęp –</option>${ZASTEPY.map(z => `<option>${z}</option>`).join("")}<option value="">jestem w kadrze</option></select>
-  <button id="reg">Załóż konto</button></div>
-  <p class="mut">Login: małe litery bez polskich znaków, cyfry, kropka, myślnik (np. <b>jan.kowalski</b>).<br>
-  Po założeniu konta kadra musi zatwierdzić Twoją rolę.</p></div>`;
+  <div class="row"><input id="em" placeholder="Imię i nazwisko" autocomplete="username" autocapitalize="words" spellcheck="false"></div>
+  <div class="row"><input id="pw" type="password" placeholder="Hasło (min. 6 znaków)" autocomplete="current-password"></div>
+  <div class="row"><button class="pri" id="li">Zaloguj</button><button id="reg">Załóż konto</button></div>
+  <p class="mut">Wpisz swoje imię i nazwisko, np. <b>Jan Kowalski</b> — tak samo przy zakładaniu konta i przy logowaniu.<br>
+  Przy zakładaniu konta nie wybierasz roli ani zastępu — nada je kadra.</p></div>`;
 }
 const DOMAIN = "@kniejapunkty.firebaseapp.com";
 function loginToEmail(l) {
@@ -100,16 +100,18 @@ function loginToEmail(l) {
   return l + DOMAIN;
 }
 const loginOf = e => String(e || "").replace(DOMAIN, "");
-const PL_ERR = { "auth/invalid-credential": "Zły login lub hasło.", "auth/invalid-login-credentials": "Zły login lub hasło.",
-  "auth/wrong-password": "Zły login lub hasło.", "auth/user-not-found": "Nie ma takiego loginu.",
-  "auth/email-already-in-use": "Ten login jest już zajęty.", "auth/weak-password": "Hasło musi mieć co najmniej 6 znaków.",
-  "auth/invalid-email": "Nieprawidłowy login.", "auth/too-many-requests": "Za dużo prób. Spróbuj za chwilę." };
+const PL_ERR = { "auth/invalid-credential": "Złe imię i nazwisko lub hasło.", "auth/invalid-login-credentials": "Złe imię i nazwisko lub hasło.",
+  "auth/wrong-password": "Złe imię i nazwisko lub hasło.", "auth/user-not-found": "Nie ma takiego konta.",
+  "auth/email-already-in-use": "Konto z tym imieniem i nazwiskiem już istnieje. Zaloguj się albo dodaj np. cyfrę (Jan Kowalski 2).", "auth/weak-password": "Hasło musi mieć co najmniej 6 znaków.",
+  "auth/invalid-email": "Wpisz imię i nazwisko literami.", "auth/too-many-requests": "Za dużo prób. Spróbuj za chwilę." };
 binders.login = () => {
-  const go = f => { const l = $("#em").value; if (!l.trim()) return alert("Wpisz login");
+  const go = f => { const l = $("#em").value; if (!l.trim()) return alert("Wpisz imię i nazwisko");
     f(auth, loginToEmail(l), $("#pw").value).then(() => { S.tab = "wyniki"; render(); })
       .catch(e => alert(PL_ERR[e.code] || ("Błąd: " + e.message))); };
   $("#li").onclick = () => go(signInWithEmailAndPassword);
-  $("#reg").onclick = () => { S.regZastep = $("#rz").value; go(createUserWithEmailAndPassword); };
+  $("#reg").onclick = () => { const n = $("#em").value.trim().replace(/\s+/g, " ");
+    if (n.length < 3) return alert("Wpisz imię i nazwisko");
+    S.regName = n; go(createUserWithEmailAndPassword); };
 };
 
 // ---------- WYNIKI
@@ -141,19 +143,27 @@ function vZbiorki() {
     Zbiórka liczy się do punktacji dopiero po zatwierdzeniu przez kadrę. Liczy się jedna zbiórka na tydzień (pon–nd).</p></div>`;
   const zCell = z => isKadra() ? `<select data-zs="${z.id}">${ZASTEPY.includes(z.zastep) ? "" : `<option value="">⚠ wybierz</option>`}${ZASTEPY.map(x => `<option ${x === z.zastep ? "selected" : ""}>${x}</option>`).join("")}</select>`
       : (ZASTEPY.includes(z.zastep) ? z.zastep : `<span class="err">brak zastępu</span>`);
-  const row = z => `<tr><td><b>${plDay(z.data)}</b></td><td class="mut">${plTs(z.utworzono)}</td><td>${zCell(z)}</td><td>${esc(z.opis)}</td><td class="act">
+  const row = (z, who) => `<tr><td><b>${plDay(z.data)}</b></td><td class="mut">${plTs(z.utworzono)}</td><td>${zCell(z)}</td><td>${esc(z.opis)}</td>
+    ${who ? `<td>${ktoKiedy(z.zatwierdzilImie, z.zatwierdzil, z.zatwierdzono)}</td>` : ""}<td class="act">
     ${isKadra() && z.status !== "zatwierdzona" ? `<button data-ok="${z.id}">✔ Zatwierdź</button>` : ""}
     ${isKadra() && z.status === "oczekuje" ? `<button data-no="${z.id}" title="Odrzuć">✖</button>` : ""}
     ${(isKadra() || (z.zastep === mine && z.status === "oczekuje")) ? `<button class="del" data-del="${z.id}">Usuń</button>` : ""}</td></tr>`;
-  const table = (list, empty) => `<div class="scroll"><table><tr><th>Data zbiórki</th><th>Zgłoszono</th><th>Zastęp</th><th>Opis</th><th></th></tr>
-    ${list.map(row).join("") || `<tr><td colspan=5 class="mut">${empty}</td></tr>`}</table></div>`;
+  const table = (list, empty, who) => `<div class="scroll"><table><tr><th>Data zbiórki</th><th>Zgłoszono</th><th>Zastęp</th><th>Opis</th>${who ? `<th>${who}</th>` : ""}<th></th></tr>
+    ${list.map(z => row(z, who)).join("") || `<tr><td colspan=6 class="mut">${empty}</td></tr>`}</table></div>`;
+  // Szeregowy widzi tylko zatwierdzone zbiórki własnego zastępu.
+  if (rola() === "szeregowy") {
+    const mz = S.profile?.zastep;
+    if (!ZASTEPY.includes(mz)) return `<div class="card"><p class="err">Nie masz przypisanego zastępu. Poproś kadrę o przypisanie.</p></div>`;
+    const accMine = S.zbiorki.filter(z => z.status === "zatwierdzona" && z.zastep === mz && inQ(z.data));
+    return `<div class="card"><h2>✅ Zbiórki zastępu ${esc(mz)} <span class="badge ok">${accMine.length}</span></h2>${quarterPicker()}${table(accMine, "Brak zatwierdzonych zbiórek w tym kwartale", "Zatwierdził")}</div>`;
+  }
   const pend = S.zbiorki.filter(z => z.status === "oczekuje");
   const acc = S.zbiorki.filter(z => z.status === "zatwierdzona" && inQ(z.data));
   const rej = S.zbiorki.filter(z => z.status === "odrzucona" && inQ(z.data));
   return form
     + `<div class="card"><h2>⏳ Oczekujące na zatwierdzenie <span class="badge w">${pend.length}</span></h2>${table(pend, "Brak oczekujących zgłoszeń")}</div>`
-    + `<div class="card"><h2>✅ Zatwierdzone <span class="badge ok">${acc.length}</span></h2>${quarterPicker()}${table(acc, "Brak zatwierdzonych zbiórek w tym kwartale")}
-      ${rej.length ? `<details><summary class="mut">Odrzucone w tym kwartale (${rej.length})</summary>${table(rej, "")}</details>` : ""}</div>`;
+    + `<div class="card"><h2>✅ Zatwierdzone <span class="badge ok">${acc.length}</span></h2>${quarterPicker()}${table(acc, "Brak zatwierdzonych zbiórek w tym kwartale", "Zatwierdził")}
+      ${rej.length ? `<details><summary class="mut">Odrzucone w tym kwartale (${rej.length})</summary>${table(rej, "", "Odrzucił")}</details>` : ""}</div>`;
 }
 binders.zbiorki = () => {
   $("#zadd") && ($("#zadd").onclick = () => {
@@ -166,8 +176,8 @@ binders.zbiorki = () => {
       status: "oczekuje", autor: S.user.uid, utworzono: serverTimestamp() }).then(() => { const o = $("#zo"); if (o) o.value = ""; }).catch(err); });
   $$("[data-zs]").forEach(el => el.onchange = () => el.value &&
     updateDoc(doc(db, "zbiorkiZastepu", el.dataset.zs), { zastep: el.value }).catch(err));
-  $$("[data-ok]").forEach(b => b.onclick = () => updateDoc(doc(db, "zbiorkiZastepu", b.dataset.ok), { status: "zatwierdzona", zatwierdzil: S.user.uid }).catch(err));
-  $$("[data-no]").forEach(b => b.onclick = () => updateDoc(doc(db, "zbiorkiZastepu", b.dataset.no), { status: "odrzucona" }).catch(err));
+  $$("[data-ok]").forEach(b => b.onclick = () => updateDoc(doc(db, "zbiorkiZastepu", b.dataset.ok), { status: "zatwierdzona", zatwierdzil: S.user.uid, zatwierdzilImie: myName(), zatwierdzono: serverTimestamp() }).catch(err));
+  $$("[data-no]").forEach(b => b.onclick = () => updateDoc(doc(db, "zbiorkiZastepu", b.dataset.no), { status: "odrzucona", zatwierdzil: S.user.uid, zatwierdzilImie: myName(), zatwierdzono: serverTimestamp() }).catch(err));
   $$("[data-del]").forEach(b => b.onclick = () => confirm("Usunąć zgłoszenie?") && deleteDoc(doc(db, "zbiorkiZastepu", b.dataset.del)).catch(err));
 };
 
@@ -278,7 +288,7 @@ function vAlarmy() {
     const items = S.alarmy.filter(a => alarmState(a) !== "po" || myMeld(a)).filter(a => inQ(a.data)).map(a => {
       const m = myMeld(a), st = alarmState(a);
       let body;
-      if (m) body = `<span class="badge ${MSTAT[m.status]?.[0]}">${MSTAT[m.status]?.[1] || m.status}</span> <span class="mut">zgłoszono ${plTime(m.czasMs)}</span>
+      if (m) body = `<span class="badge ${MSTAT[m.status]?.[0]}">${MSTAT[m.status]?.[1] || m.status}</span> <span class="mut">zgłoszono ${plTime(m.czasMs)}${m.status !== "oczekuje" && (m.sprawdzilImie || m.sprawdzil) ? ` · ${m.status === "odrzucony" ? "odrzucił" : "zaakceptował"}: ${esc(kto(m.sprawdzilImie, m.sprawdzil))}` : ""}</span>
         ${m.status === "oczekuje" ? `<button class="del" data-undo="${m.id}">Cofnij</button>` : ""}`;
       else if (!ZASTEPY.includes(mine)) body = `<span class="err">Nie masz przypisanego zastępu — poproś kadrę.</span>`;
       else if (st === "przed") body = `<span class="mut">Start: ${plTs(a.startMs)}</span>`;
@@ -364,14 +374,14 @@ document.addEventListener("click", e => { const m = $("#modal"); if (e.target ==
 function vAlarmDetail() {
   const a = S.alarmy.find(x => x.id === S.view.id); if (!a) { S.view = null; return vAlarmy(); }
   const r = alarmPoints(S.cfg, a, S.meldunki), ms = meldOf(a).sort((x, y) => x.czasMs - y.czasMs), labels = progLabels(alarmProgiMin(S.cfg, a));
-  const row = m => { const min = meldMinute(a, m), pi = min == null ? null : progIndex(S.cfg, a, min);
+  const row = (m, who) => { const min = meldMinute(a, m), pi = min == null ? null : progIndex(S.cfg, a, min);
     return `<tr><td>${plTime(m.czasMs)}<div class="mut">${min == null ? "" : Math.floor(min) + " min"}</div></td><td>${esc(m.imie)}</td><td>${esc(m.zastep)}</td>
     <td>${pi == null ? "–" : `${pi + 1}. próg<div class="mut">${S.cfg.alarmProgi[pi] ?? 0} pkt</div>`}</td>
-    <td class="act">${isKadra() || m.uid === S.user?.uid ? `<button data-ph="${m.id}">📷</button>` : ""}
+    ${who ? `<td>${ktoKiedy(m.sprawdzilImie, m.sprawdzil, m.sprawdzono)}</td>` : ""}<td class="act">${isKadra() || m.uid === S.user?.uid ? `<button data-ph="${m.id}">📷</button>` : ""}
     ${isKadra() && m.status !== "zaakceptowany" ? `<button data-acc="${m.id}">✔ Akceptuj</button>` : ""}
     ${isKadra() && m.status !== "odrzucony" ? `<button data-rej="${m.id}" title="Odrzuć">✖</button>` : ""}</td></tr>`; };
-  const tbl = (list, empty) => `<div class="scroll"><table><tr><th>Godz.</th><th>Kto</th><th>Zastęp</th><th>Próg</th><th></th></tr>
-    ${list.map(row).join("") || `<tr><td colspan=5 class="mut">${empty}</td></tr>`}</table></div>`;
+  const tbl = (list, empty, who) => `<div class="scroll"><table><tr><th>Godz.</th><th>Kto</th><th>Zastęp</th><th>Próg</th>${who ? `<th>${who}</th>` : ""}<th></th></tr>
+    ${list.map(m => row(m, who)).join("") || `<tr><td colspan=6 class="mut">${empty}</td></tr>`}</table></div>`;
   const pend = ms.filter(m => m.status === "oczekuje"), acc = ms.filter(m => m.status === "zaakceptowany"), rej = ms.filter(m => m.status === "odrzucony");
   return `<div class="card"><div class="row"><button id="back">← Alarmy</button></div>
     <h2>${esc(a.nazwa) || "Alarm"}</h2><p class="mut">${plDay(a.data)}${a.start ? ", start " + a.start : ""} · progi: ${labels.join(" · ")}</p>
@@ -382,12 +392,12 @@ function vAlarmDetail() {
     <tr><td><b>Razem</b></td>${ZASTEPY.map(z => `<td class="n"><b>${frac(r[z].total)}</b></td>`).join("")}</tr></table></div></div>
     <div class="card"><h2>⏳ Czekają na akceptację <span class="badge w">${pend.length}</span></h2>
     ${isKadra() && pend.length ? `<div class="row"><button class="pri" id="accall">✔ Akceptuj wszystkie (${pend.length})</button></div>` : ""}${tbl(pend, "Brak")}</div>
-    <div class="card"><h2>✅ Zaakceptowane <span class="badge ok">${acc.length}</span></h2>${tbl(acc, "Brak")}
-    ${rej.length ? `<details><summary class="mut">Odrzucone (${rej.length})</summary>${tbl(rej, "")}</details>` : ""}</div>`;
+    <div class="card"><h2>✅ Zaakceptowane <span class="badge ok">${acc.length}</span></h2>${tbl(acc, "Brak", "Zaakceptował")}
+    ${rej.length ? `<details><summary class="mut">Odrzucone (${rej.length})</summary>${tbl(rej, "", "Odrzucił")}</details>` : ""}</div>`;
 }
 function bindAlarmDetail() {
   $("#back").onclick = () => { S.view = null; render(); };
-  const set = (id, status) => updateDoc(doc(db, "meldunki", id), { status, sprawdzil: S.user.uid }).catch(err);
+  const set = (id, status) => updateDoc(doc(db, "meldunki", id), { status, sprawdzil: S.user.uid, sprawdzilImie: myName(), sprawdzono: serverTimestamp() }).catch(err);
   $$("[data-acc]").forEach(b => b.onclick = () => set(b.dataset.acc, "zaakceptowany"));
   $$("[data-rej]").forEach(b => b.onclick = () => set(b.dataset.rej, "odrzucony"));
   $$("[data-ph]").forEach(b => b.onclick = () => showPhoto(b.dataset.ph));
@@ -471,7 +481,7 @@ function vUsers() {
   const users = [...S.users].sort((a, b) => (a.rola === "brak" ? 0 : 1) - (b.rola === "brak" ? 0 : 1) || (a.zastep || "").localeCompare(b.zastep || "") || (a.imie || "").localeCompare(b.imie || ""));
   const nowi = users.filter(u => u.rola === "brak").length;
   return `<div class="card"><h2>Użytkownicy ${nowi ? `<span class="badge w">${nowi} nowych</span>` : ""}</h2>
-   <p class="mut">Nowe osoby zakładają konto same (wybierając zastęp), a tu nadajesz im rolę: <b>szeregowy</b> melduje alarmy, <b>zastępowy</b> dodatkowo zgłasza zbiórki zastępu, <b>kadra</b> zarządza wszystkim.</p><div class="scroll"><table>
+   <p class="mut">Nowe osoby zakładają konto same (imię i nazwisko + hasło), a tu nadajesz im rolę i zastęp: <b>szeregowy</b> melduje alarmy, <b>zastępowy</b> dodatkowo zgłasza zbiórki zastępu, <b>kadra</b> zarządza wszystkim.</p><div class="scroll"><table>
    <tr><th>Login</th><th>Imię</th><th>Rola</th><th>Zastęp</th></tr>
    ${users.map(u => `<tr><td>${esc(loginOf(u.email))}</td><td><input data-u="${u.id}" data-f="imie" value="${esc(u.imie)}"></td>
    <td><select data-u="${u.id}" data-f="rola">${ROLE.map(r => `<option ${u.rola === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
