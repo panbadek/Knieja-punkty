@@ -10,7 +10,11 @@ const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestor
 const S = { user: null, profile: null, cfg: DEFAULT_CONFIG, zbiorki: [], akcje: [], alarmy: [], users: [], tab: "wyniki", q: 0, edit: null };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
-const today = () => fmtD(Date.now() + 2*3600e3);   // ok. czas PL
+const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Warsaw" });   // RRRR-MM-DD, czas PL
+const currentQ = () => S.cfg.kwartaly.find(q => today() >= q.start && today() <= q.end);
+const plDay = d => d ? d.split("-").reverse().join(".") : "–";
+const plTs = t => { const d = t?.toDate ? t.toDate() : (t ? new Date(t) : null);
+  return d && !isNaN(d) ? d.toLocaleString("pl-PL", { timeZone: "Europe/Warsaw", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "–"; };
 const rola = () => S.profile?.rola || "gosc";
 const isKadra = () => rola() === "kadra", canEdit = () => ["kadra","zastepowy"].includes(rola());
 const quarter = () => S.cfg.kwartaly[S.q] || S.cfg.kwartaly[0];
@@ -109,26 +113,31 @@ function vZbiorki() {
   const list = S.zbiorki.filter(z => inQ(z.data));
   const mine = rola() === "zastepowy" ? S.profile.zastep : null;
   const noZ = rola() === "zastepowy" && !ZASTEPY.includes(mine);
-  const form = noZ ? `<div class="card"><h2>Zgłoś zbiórkę zastępu</h2><p class="err">Nie masz przypisanego zastępu. Poproś kadrę, żeby przypisała Ci zastęp w zakładce Użytkownicy.</p></div>`
+  const cq = currentQ();
+  const form = !canEdit() ? "" : !cq ? `<div class="card"><h2>Zgłoś zbiórkę zastępu</h2><p class="err">Dzisiejsza data nie należy do żadnego kwartału. Kadra musi dodać bieżący kwartał w Ustawieniach.</p></div>`
+    : noZ ? `<div class="card"><h2>Zgłoś zbiórkę zastępu</h2><p class="err">Nie masz przypisanego zastępu. Poproś kadrę, żeby przypisała Ci zastęp w zakładce Użytkownicy.</p></div>`
     : canEdit() ? `<div class="card"><h2>Zgłoś zbiórkę zastępu</h2><div class="row">
     <select id="zz" ${mine ? "disabled" : ""}>${ZASTEPY.map(z => `<option ${z === mine ? "selected" : ""}>${z}</option>`).join("")}</select>
-    <input id="zd" type="date" value="${today()}"><input id="zo" placeholder="krótki opis (opcjonalnie)">
+    <input id="zd" type="date" value="${today()}" min="${cq?.start}" max="${cq?.end}"><input id="zo" placeholder="krótki opis (opcjonalnie)">
     <button class="pri" id="zadd">Zgłoś</button></div>
-    <p class="mut">Zbiórka liczy się do punktacji dopiero po zatwierdzeniu przez kadrę. Liczy się jedna zbiórka na tydzień (pon–nd).</p></div>` : "";
+    <p class="mut">Można zgłaszać tylko zbiórki z bieżącego kwartału: <b>${esc(cq?.nazwa)}</b> (${plDay(cq?.start)} – ${plDay(cq?.end)}).<br>
+    Zbiórka liczy się do punktacji dopiero po zatwierdzeniu przez kadrę. Liczy się jedna zbiórka na tydzień (pon–nd).</p></div>` : "";
   const badge = s => `<span class="badge ${s === "zatwierdzona" ? "ok" : s === "odrzucona" ? "no" : "w"}">${s}</span>`;
-  const rows = list.map(z => `<tr><td>${z.data}</td><td>${isKadra() ? `<select data-zs="${z.id}">${ZASTEPY.includes(z.zastep) ? "" : `<option value="">⚠ wybierz</option>`}${ZASTEPY.map(x => `<option ${x === z.zastep ? "selected" : ""}>${x}</option>`).join("")}</select>`
+  const rows = list.map(z => `<tr><td><b>${plDay(z.data)}</b></td><td class="mut">${plTs(z.utworzono)}</td><td>${isKadra() ? `<select data-zs="${z.id}">${ZASTEPY.includes(z.zastep) ? "" : `<option value="">⚠ wybierz</option>`}${ZASTEPY.map(x => `<option ${x === z.zastep ? "selected" : ""}>${x}</option>`).join("")}</select>`
       : (ZASTEPY.includes(z.zastep) ? z.zastep : `<span class="err">brak zastępu</span>`)}</td><td>${esc(z.opis)}</td><td>${badge(z.status)}</td><td>
     ${isKadra() && z.status !== "zatwierdzona" ? `<button data-ok="${z.id}">✔ Zatwierdź</button>` : ""}
     ${isKadra() && z.status === "oczekuje" ? `<button data-no="${z.id}">✖</button>` : ""}
     ${(isKadra() || (z.zastep === mine && z.status === "oczekuje")) ? `<button class="del" data-del="${z.id}">Usuń</button>` : ""}</td></tr>`).join("");
   return form + `<div class="card"><h2>Zbiórki zastępów</h2>${quarterPicker()}<div class="scroll"><table>
-    <tr><th>Data</th><th>Zastęp</th><th>Opis</th><th>Status</th><th></th></tr>${rows || `<tr><td colspan=5 class="mut">Brak zbiórek w tym kwartale</td></tr>`}</table></div></div>`;
+    <tr><th>Data zbiórki</th><th>Zgłoszono</th><th>Zastęp</th><th>Opis</th><th>Status</th><th></th></tr>${rows || `<tr><td colspan=6 class="mut">Brak zbiórek w tym kwartale</td></tr>`}</table></div></div>`;
 }
 binders.zbiorki = () => {
   $("#zadd") && ($("#zadd").onclick = () => {
     const zastep = rola() === "zastepowy" ? S.profile.zastep : $("#zz").value, data = $("#zd").value;
     if (!ZASTEPY.includes(zastep)) return alert("Wybierz zastęp");
     if (!data) return alert("Wybierz datę");
+    const cq = currentQ();
+    if (!cq || data < cq.start || data > cq.end) return alert(`Można zgłaszać tylko zbiórki z bieżącego kwartału (${plDay(cq?.start)} – ${plDay(cq?.end)}).`);
     addDoc(collection(db, "zbiorkiZastepu"), { zastep, data, opis: $("#zo").value,
       status: "oczekuje", autor: S.user.uid, utworzono: serverTimestamp() }).then(() => { $("#zo").value = ""; }).catch(err); });
   document.querySelectorAll("[data-zs]").forEach(el => el.onchange = () => el.value &&
