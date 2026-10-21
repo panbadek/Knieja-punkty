@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function signed() { return request.auth != null; }
+    function hasProfile() { return signed() && exists(/databases/$(db)/documents/users/$(request.auth.uid)); }
+    function me() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
+    function kadra() { return hasProfile() && me().rola == 'kadra'; }
+    function zastepowy() { return hasProfile() && me().rola == 'zastepowy'; }
+
+    // Wyniki i dane są publiczne do odczytu (profil z wynikami)
+    match /config/{d} { allow read: if true; allow write: if kadra(); }
+
+    match /users/{uid} {
+      allow read: if signed() && (request.auth.uid == uid || kadra());
+      allow create: if signed() && request.auth.uid == uid && request.resource.data.rola == 'brak';
+      allow update, delete: if kadra();
+    }
+
+    match /zbiorkiZastepu/{id} {
+      allow read: if true;
+      allow create: if kadra() ||
+        (zastepowy() && request.resource.data.zastep == me().zastep && request.resource.data.status == 'oczekuje');
+      allow update: if kadra() ||
+        (zastepowy() && resource.data.zastep == me().zastep && resource.data.status == 'oczekuje'
+          && request.resource.data.status == 'oczekuje' && request.resource.data.zastep == me().zastep);
+      allow delete: if kadra() ||
+        (zastepowy() && resource.data.zastep == me().zastep && resource.data.status == 'oczekuje');
+    }
+
+    match /akcje/{id}  { allow read: if true; allow write: if kadra() || zastepowy(); }
+    match /alarmy/{id} { allow read: if true; allow write: if kadra() || zastepowy(); }
+  }
+}
