@@ -28,7 +28,7 @@ onAuthStateChanged(auth, async u => {
   S.user = u; S.profile = null; usersUnsub?.(); usersUnsub = null;
   if (u) {
     const ref = doc(db, "users", u.uid); let s = await getDoc(ref);
-    if (!s.exists()) { await setDoc(ref, { email: u.email, imie: u.email.split("@")[0], rola: "brak", zastep: "" }); s = await getDoc(ref); }
+    if (!s.exists()) { await setDoc(ref, { email: u.email, imie: loginOf(u.email), rola: "brak", zastep: "" }); s = await getDoc(ref); }
     onSnapshot(ref, d => { S.profile = d.data(); if (isKadra() && !usersUnsub) usersUnsub = onSnapshot(collection(db, "users"),
       s => { S.users = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }); render(); });
   }
@@ -39,7 +39,7 @@ function pickQuarter() { const t = today(); const i = S.cfg.kwartaly.findIndex(q
 // ---------- nawigacja i logowanie
 const TABS = [["wyniki","🏆 Wyniki"],["zbiorki","🔥 Zbiórki zastępu"],["akcje","⛺ Zbiórki drużyny / biwaki"],["alarmy","🚨 Alarmy"],["ustawienia","⚙️ Ustawienia"],["uzytkownicy","👥 Użytkownicy"]];
 function renderChrome() {
-  $("#who").textContent = S.user ? `${S.profile?.imie || S.user.email} · ${{ kadra: "kadra", zastepowy: "zastępowy " + (S.profile?.zastep || ""), brak: "czeka na nadanie roli" }[rola()] || ""}` : "podgląd wyników";
+  $("#who").textContent = S.user ? `${S.profile?.imie || loginOf(S.user.email)} · ${{ kadra: "kadra", zastepowy: "zastępowy " + (S.profile?.zastep || ""), brak: "czeka na nadanie roli" }[rola()] || ""}` : "podgląd wyników";
   $("#authbox").innerHTML = S.user ? `<button id="out">Wyloguj</button>` : `<button id="in">Zaloguj</button>`;
   $("#out") && ($("#out").onclick = () => signOut(auth));
   $("#in") && ($("#in").onclick = () => { S.tab = "login"; render(); });
@@ -65,13 +65,28 @@ const binders = {};
 // ---------- logowanie
 function vLogin() {
   return `<div class="card"><h2>Logowanie</h2>
-  <div class="row"><input id="em" type="email" placeholder="e-mail" autocomplete="username"></div>
+  <div class="row"><input id="em" placeholder="login" autocomplete="username" autocapitalize="none" spellcheck="false"></div>
   <div class="row"><input id="pw" type="password" placeholder="hasło (min. 6 znaków)" autocomplete="current-password"></div>
   <div class="row"><button class="pri" id="li">Zaloguj</button><button id="reg">Załóż konto</button></div>
-  <p class="mut">Po założeniu konta kadra musi nadać Ci rolę (kadra albo zastępowy danego zastępu).</p></div>`;
+  <p class="mut">Login: małe litery bez polskich znaków, cyfry, kropka, myślnik (np. <b>jan.kowalski</b>).<br>
+  Po założeniu konta kadra musi nadać Ci rolę (kadra albo zastępowy danego zastępu).</p></div>`;
 }
+const DOMAIN = "@kniejapunkty.firebaseapp.com";
+function loginToEmail(l) {
+  l = l.trim().toLowerCase();
+  if (l.includes("@")) return l;
+  l = l.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ł/g, "l").replace(/\s+/g, ".").replace(/[^a-z0-9._-]/g, "");
+  return l + DOMAIN;
+}
+const loginOf = e => String(e || "").replace(DOMAIN, "");
+const PL_ERR = { "auth/invalid-credential": "Zły login lub hasło.", "auth/invalid-login-credentials": "Zły login lub hasło.",
+  "auth/wrong-password": "Zły login lub hasło.", "auth/user-not-found": "Nie ma takiego loginu.",
+  "auth/email-already-in-use": "Ten login jest już zajęty.", "auth/weak-password": "Hasło musi mieć co najmniej 6 znaków.",
+  "auth/invalid-email": "Nieprawidłowy login.", "auth/too-many-requests": "Za dużo prób. Spróbuj za chwilę." };
 binders.login = () => {
-  const go = f => f(auth, $("#em").value.trim(), $("#pw").value).then(() => { S.tab = "wyniki"; render(); }).catch(err);
+  const go = f => { const l = $("#em").value; if (!l.trim()) return alert("Wpisz login");
+    f(auth, loginToEmail(l), $("#pw").value).then(() => { S.tab = "wyniki"; render(); })
+      .catch(e => alert(PL_ERR[e.code] || ("Błąd: " + e.message))); };
   $("#li").onclick = () => go(signInWithEmailAndPassword); $("#reg").onclick = () => go(createUserWithEmailAndPassword);
 };
 
@@ -258,8 +273,8 @@ binders.ustawienia = () => {
 // ---------- UŻYTKOWNICY (kadra)
 function vUsers() {
   return `<div class="card"><h2>Użytkownicy</h2><p class="mut">Nowe osoby zakładają konto same, a tu nadajesz im rolę.</p><div class="scroll"><table>
-   <tr><th>E-mail</th><th>Imię</th><th>Rola</th><th>Zastęp</th></tr>
-   ${S.users.map(u => `<tr><td>${esc(u.email)}</td><td><input data-u="${u.id}" data-f="imie" value="${esc(u.imie)}"></td>
+   <tr><th>Login</th><th>Imię</th><th>Rola</th><th>Zastęp</th></tr>
+   ${S.users.map(u => `<tr><td>${esc(loginOf(u.email))}</td><td><input data-u="${u.id}" data-f="imie" value="${esc(u.imie)}"></td>
    <td><select data-u="${u.id}" data-f="rola">${["brak","zastepowy","kadra"].map(r => `<option ${u.rola === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
    <td><select data-u="${u.id}" data-f="zastep"><option value="">–</option>${ZASTEPY.map(z => `<option ${u.zastep === z ? "selected" : ""}>${z}</option>`).join("")}</select></td></tr>`).join("")}
    </table></div></div>`;
