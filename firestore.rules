@@ -4,7 +4,8 @@ service cloud.firestore {
     function signed() { return request.auth != null; }
     function hasProfile() { return signed() && exists(/databases/$(db)/documents/users/$(request.auth.uid)); }
     function me() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
-    function admin() { return hasProfile() && me().rola == 'admin'; }
+    // Administrator = konto kadry z przełącznikiem admin == true (rola 'admin' dla zgodności wstecz)
+    function admin() { return hasProfile() && ((me().rola == 'kadra' && me().get('admin', false) == true) || me().rola == 'admin'); }
     function kadra() { return hasProfile() && me().rola in ['kadra', 'admin']; }
     function zastepowy() { return hasProfile() && me().rola == 'zastepowy'; }
     function szeregowy() { return hasProfile() && me().rola == 'szeregowy'; }
@@ -16,7 +17,11 @@ service cloud.firestore {
     // Konta: tylko administrator tworzy, zmienia i usuwa
     match /users/{uid} {
       allow read: if signed() && (request.auth.uid == uid || kadra());
-      allow write: if admin();
+      allow create: if admin();
+      // własnej funkcji i uprawnień administratora nie można sobie zmienić — robi to inny administrator
+      allow update: if admin() && (uid != request.auth.uid ||
+        (request.resource.data.rola == resource.data.rola && request.resource.data.get('admin', false) == resource.data.get('admin', false)));
+      allow delete: if admin() && uid != request.auth.uid;
     }
     match /loginy/{login} {
       allow get: if true;

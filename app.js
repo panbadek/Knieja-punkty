@@ -20,7 +20,9 @@ const PLF = { timeZone: "Europe/Warsaw", day: "2-digit", month: "2-digit", year:
 const plTs = t => { const d = t?.toDate ? t.toDate() : (t != null ? new Date(t) : null); return d && !isNaN(d) ? d.toLocaleString("pl-PL", PLF) : "–"; };
 const plTime = ms => ms == null ? "–" : new Date(ms).toLocaleTimeString("pl-PL", { timeZone: "Europe/Warsaw", hour: "2-digit", minute: "2-digit" });
 const rola = () => S.profile?.rola || "gosc";
-const isAdmin = () => rola() === "admin";
+// Administrator = konto kadry z włączonym przełącznikiem "admin" (rola "admin" obsługiwana dla zgodności wstecz).
+const isAdm = u => !!u && ((u.rola === "kadra" && u.admin === true) || u.rola === "admin");
+const isAdmin = () => isAdm(S.profile);
 const isKadra = () => ["kadra", "admin"].includes(rola());                   // admin ma też uprawnienia kadry
 const canZglaszac = () => isKadra() || rola() === "zastepowy";               // zbiórki zastępu
 const canMeldowac = () => ["szeregowy", "zastepowy"].includes(rola());     // meldunki z alarmów
@@ -43,7 +45,7 @@ live("zbiorkiZastepu", "zbiorki"); live("akcje", "akcje"); live("alarmy", "alarm
 live("meldunki", "meldunki", m => ({ ...m, czasMs: m.czas?.toMillis ? m.czas.toMillis() : (m.czas == null ? Date.now() : Number(m.czas)) }));
 let usersUnsub = null, profUnsub = null, secretsUnsub = null;
 onAuthStateChanged(auth, async u => {
-  S.user = u; S.profile = null; S.secrets = {}; usersUnsub?.(); usersUnsub = null; profUnsub?.(); profUnsub = null; secretsUnsub?.(); secretsUnsub = null;
+  S.user = u; S.profile = null; S.secrets = {}; S.edit = null; S.view = null; S.photo = null; S.busy = false; usersUnsub?.(); usersUnsub = null; profUnsub?.(); profUnsub = null; secretsUnsub?.(); secretsUnsub = null;
   if (u) {
     const ref = doc(db, "users", u.uid);
     profUnsub = onSnapshot(ref, d => { S.profile = d.data() || null;
@@ -60,7 +62,7 @@ function pickQuarter() { const t = today(); const i = S.cfg.kwartaly.findIndex(q
 
 // ---------- nawigacja
 const TABS = [["wyniki","🏆 Wyniki"],["zbiorki","🔥 Zbiórki zastępu"],["akcje","⛺ Zbiórki drużyny / biwaki"],["alarmy","🚨 Alarmy"],["ustawienia","⚙️ Ustawienia"],["uzytkownicy","👥 Użytkownicy"]];
-const ROLA_TXT = () => ({ admin: "administrator", kadra: "kadra", zastepowy: "zastępowy · " + (S.profile?.zastep || "bez zastępu"),
+const ROLA_TXT = () => ({ admin: "kadra · administrator", kadra: isAdmin() ? "kadra · administrator" : "kadra", zastepowy: "zastępowy · " + (S.profile?.zastep || "bez zastępu"),
   szeregowy: "szeregowy · " + (S.profile?.zastep || "bez zastępu"), brak: "konto nieaktywne" }[rola()] || (S.user && !S.profile ? "konto nieaktywne" : ""));
 function renderChrome() {
   $("#who").textContent = S.user ? `${S.profile?.imie || loginOf(S.user.email)} · ${ROLA_TXT()}` : "podgląd wyników";
@@ -479,8 +481,8 @@ binders.ustawienia = () => {
 // Firebase (plan darmowy) nie pozwala administratorowi zmienić hasła ani usunąć cudzego konta bezpośrednio,
 // więc robimy to, logując się na chwilę na to konto w osobnej, niewidocznej sesji (hasło trzymamy w kolekcji
 // "sekrety", którą może czytać tylko administrator).
-const ROLE = [["szeregowy", "Szeregowy"], ["zastepowy", "Zastępowy"], ["kadra", "Kadra"], ["admin", "Administrator"]];
-const ROLE_PL = Object.fromEntries(ROLE);
+const ROLE = [["szeregowy", "Szeregowy"], ["zastepowy", "Zastępowy"], ["kadra", "Kadra"]];
+const ROLE_PL = { ...Object.fromEntries(ROLE), admin: "Kadra" };
 let _sec = null;
 const secAuth = () => _sec || (_sec = initializeAuth(initializeApp(firebaseConfig, "admin-helper"), { persistence: inMemoryPersistence }));
 async function asUser(email, pass, fn) {
@@ -504,7 +506,7 @@ function vUsers() {
    <div class="scroll"><table><tr><th>Imię i nazwisko</th><th>Login</th><th>Hasło</th><th>Funkcja</th><th>Zastęp</th><th></th></tr>
    ${users.map(u => `<tr><td>${esc(u.imie)}${u.id === S.user.uid ? ` <span class="badge">Ty</span>` : ""}</td><td>${esc(loginOfUser(u))}</td>
    <td>${S.secrets?.[u.id] ? `<button data-show="${u.id}" class="mut">pokaż</button>` : `<span class="mut">nieznane</span>`}</td>
-   <td>${ROLE_PL[u.rola] || `<span class="err">${esc(u.rola || "brak")}</span>`}</td>
+   <td>${ROLE_PL[u.rola] || `<span class="err">${esc(u.rola || "brak")}</span>`}${isAdm(u) ? ` <span class="badge ok">🛡 admin</span>` : ""}</td>
    <td>${ZASTEPY.includes(u.zastep) ? u.zastep : (["zastepowy", "szeregowy"].includes(u.rola) ? `<span class="err">⚠ brak</span>` : "–")}</td>
    <td><button data-ue="${u.id}">Edytuj</button></td></tr>`).join("")}</table></div>
    <p class="mut">Tylko administrator zakłada i usuwa konta oraz zmienia imię i nazwisko, login, hasło, zastęp i funkcję.</p></div>`;
@@ -518,6 +520,8 @@ function vUserEdit() {
    ${!isNew && !known ? `<div class="row"><label>Obecne hasło <span class="mut">(potrzebne do zmiany hasła lub usunięcia — nie jest zapisane w aplikacji)</span><br><input id="f_old" autocapitalize="none" spellcheck="false"></label></div>` : ""}
    <div class="row"><label>Funkcja<br><select id="f_rola" ${self ? "disabled" : ""}>${ROLE.map(([v, l]) => `<option value="${v}" ${u.rola === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
    <label>Zastęp<br><select id="f_zastep"><option value="">–</option>${ZASTEPY.map(z => `<option ${u.zastep === z ? "selected" : ""}>${z}</option>`).join("")}</select></label></div>
+   <div class="row" id="adminRow" ${u.rola === "kadra" ? "" : "hidden"}><label class="sw"><input type="checkbox" id="f_admin" ${u.admin ? "checked" : ""} ${self ? "disabled" : ""}><span></span> Administrator</label>
+   <span class="mut">${self ? "Twoje uprawnienia administratora może zmienić tylko inny administrator." : "Może zarządzać kontami (tylko dla kadry)."}</span></div>
    <p class="mut">Login: małe litery bez polskich znaków, cyfry, kropka, myślnik. Hasło: min. 6 znaków.</p>
    <div class="row"><button class="pri" id="usave">${isNew ? "Utwórz konto" : "Zapisz"}</button><button id="cancel">Anuluj</button>
    ${!isNew && !self ? `<button class="del" id="udel">Usuń konto</button>` : ""}</div></div>`;
@@ -527,12 +531,13 @@ binders.uzytkownicy = () => {
   if (S.edit?.kind === "user") return bindUserEdit();
   $("#unew").onclick = () => { S.edit = { kind: "user", d: emptyUser() }; render(); };
   $$("[data-ue]").forEach(b => b.onclick = () => { const u = S.users.find(x => x.id === b.dataset.ue);
-    S.edit = { kind: "user", id: u.id, d: { ...u, login: loginOfUser(u) } }; render(); });
+    S.edit = { kind: "user", id: u.id, d: { ...u, login: loginOfUser(u), rola: u.rola === "admin" ? "kadra" : u.rola, admin: isAdm(u) } }; render(); });
   $$("[data-show]").forEach(b => b.onclick = () => { b.textContent = S.secrets[b.dataset.show]; b.classList.remove("mut"); });
 };
 function bindUserEdit() {
   $("#f_imie").oninput = () => { if (!S.edit.id && !S.edit.loginTouched) $("#f_login").value = normLogin($("#f_imie").value); };
   $("#f_login").oninput = () => { S.edit.loginTouched = true; };
+  $("#f_rola").onchange = () => { $("#adminRow").hidden = $("#f_rola").value !== "kadra"; };
   $("#cancel").onclick = () => { S.edit = null; render(); };
   $("#usave").onclick = () => saveUser($("#usave"));
   $("#udel") && ($("#udel").onclick = () => removeUser($("#udel")));
@@ -545,7 +550,7 @@ async function busy(btn, label, fn) {
 function saveUser(btn) {
   const id = S.edit.id, old = S.edit.d;
   const imie = $("#f_imie").value.trim().replace(/\s+/g, " "), login = normLogin($("#f_login").value), haslo = $("#f_haslo").value;
-  const rolaV = $("#f_rola").value, zastep = $("#f_zastep").value, oldPass = S.secrets?.[id] || $("#f_old")?.value || "";
+  const rolaV = $("#f_rola").value, adminV = rolaV === "kadra" && $("#f_admin").checked, zastep = $("#f_zastep").value, oldPass = S.secrets?.[id] || $("#f_old")?.value || "";
   if (imie.length < 2) return alert("Wpisz imię i nazwisko");
   if (login.length < 2) return alert("Wpisz login");
   if ((!id || haslo) && haslo.length < 6) return alert("Hasło musi mieć co najmniej 6 znaków");
@@ -556,7 +561,7 @@ function saveUser(btn) {
       const email = "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + DOMAIN;
       const c = await createUserWithEmailAndPassword(secAuth(), email, haslo); await signOut(secAuth()).catch(() => {});
       const uid = c.user.uid;
-      await setDoc(doc(db, "users", uid), { email, login, imie, rola: rolaV, zastep });
+      await setDoc(doc(db, "users", uid), { email, login, imie, rola: rolaV, admin: adminV, zastep });
       await setDoc(doc(db, "loginy", login), { email, uid });
       await setDoc(doc(db, "sekrety", uid), { haslo });
       alert(`Konto utworzone.\nLogin: ${login}\nHasło: ${haslo}`);
@@ -572,7 +577,7 @@ function saveUser(btn) {
       await setDoc(doc(db, "loginy", login), { email: old.email, uid: id });
       if (login !== oldLogin) await deleteDoc(doc(db, "loginy", oldLogin)).catch(() => {});
     }
-    const upd = { imie, login, zastep }; if (id !== S.user.uid) upd.rola = rolaV;
+    const upd = { imie, login, zastep }; if (id !== S.user.uid) { upd.rola = rolaV; upd.admin = adminV; }
     await updateDoc(doc(db, "users", id), upd);
   });
 }
