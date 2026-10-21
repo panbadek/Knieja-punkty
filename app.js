@@ -145,9 +145,9 @@ function vAkcje() {
   const list = S.akcje.filter(a => inQ(a.data));
   const rows = list.map(a => { const r = akcjaPoints(S.cfg, a);
     return `<tr><td>${a.data}</td><td>${a.typ === "biwak" ? "Biwak" : "Zbiórka"}: ${esc(a.nazwa)}</td>${ZASTEPY.map(z => `<td class="n">${frac(r[z].total)}</td>`).join("")}
-    <td>${canEdit() ? `<button data-e="${a.id}">Edytuj</button>` : ""}</td></tr>`; }).join("");
+    <td>${isKadra() ? `<button data-e="${a.id}">Edytuj</button>` : ""}</td></tr>`; }).join("");
   return `<div class="card"><h2>Zbiórki drużyny i biwaki</h2>${quarterPicker()}
-    ${canEdit() ? `<button class="pri" id="anew">+ Nowa akcja</button>` : ""}
+    ${isKadra() ? `<button class="pri" id="anew">+ Nowa akcja</button>` : ""}
     <div class="scroll"><table><tr><th>Data</th><th>Akcja</th>${ZASTEPY.map(z => `<th class="n">${z}</th>`).join("")}<th></th></tr>
     ${rows || `<tr><td colspan=9 class="mut">Brak akcji w tym kwartale</td></tr>`}</table></div>
     <p class="mut">Punkty = gry × obecni/liczebność + umundurowanie (bez przeliczania).</p></div>`;
@@ -159,6 +159,7 @@ binders.akcje = () => {
     const a = S.akcje.find(x => x.id === b.dataset.e); S.edit = { kind: "akcja", id: a.id, d: structuredClone(a) }; render(); });
 };
 function vAkcjaEdit() {
+  if (!isKadra()) { S.edit = null; return vAkcje(); }
   const a = S.edit.d, r = akcjaPoints(S.cfg, a);
   const head = `<tr><th></th>${ZASTEPY.map(z => `<th class="n">${z}</th>`).join("")}</tr>`;
   const numRow = (label, get, path, ph = "") => `<tr><td>${label}</td>${ZASTEPY.map(z =>
@@ -217,8 +218,8 @@ function vAlarmy() {
   const list = S.alarmy.filter(a => inQ(a.data));
   const rows = list.map(a => { const r = alarmPoints(S.cfg, a);
     return `<tr><td>${a.data}</td><td>${esc(a.nazwa)}</td>${ZASTEPY.map(z => `<td class="n">${frac(r[z].total)}</td>`).join("")}
-    <td>${canEdit() ? `<button data-e="${a.id}">Edytuj</button>` : ""}</td></tr>`; }).join("");
-  return `<div class="card"><h2>Alarmy</h2>${quarterPicker()}${canEdit() ? `<button class="pri" id="anew">+ Nowy alarm</button>` : ""}
+    <td>${isKadra() ? `<button data-e="${a.id}">Edytuj</button>` : ""}</td></tr>`; }).join("");
+  return `<div class="card"><h2>Alarmy</h2>${quarterPicker()}${isKadra() ? `<button class="pri" id="anew">+ Nowy alarm</button>` : ""}
     <div class="scroll"><table><tr><th>Data</th><th>Alarm</th>${ZASTEPY.map(z => `<th class="n">${z}</th>`).join("")}<th></th></tr>
     ${rows || `<tr><td colspan=9 class="mut">Brak alarmów w tym kwartale</td></tr>`}</table></div></div>`;
 }
@@ -229,6 +230,7 @@ binders.alarmy = () => {
     const a = S.alarmy.find(x => x.id === b.dataset.e); S.edit = { kind: "alarm", id: a.id, d: structuredClone(a) }; render(); });
 };
 function vAlarmEdit() {
+  if (!isKadra()) { S.edit = null; return vAlarmy(); }
   const a = S.edit.d, r = alarmPoints(S.cfg, a);
   const head = `<tr><th></th>${ZASTEPY.map(z => `<th class="n">${z}</th>`).join("")}</tr>`;
   const progi = a.progi.map((p, i) => `<tr><td><input data-p="progi.${i}" value="${esc(p)}" style="width:110px"> <span class="mut">${S.cfg.alarmProgi[i] ?? 0} pkt/os.</span></td>

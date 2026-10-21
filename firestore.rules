@@ -27,7 +27,7 @@ service cloud.firestore {
         (zastepowy() && resource.data.zastep == me().zastep && resource.data.status == 'oczekuje');
     }
 
-    match /akcje/{id}  { allow read: if true; allow write: if kadra() || zastepowy(); }
-    match /alarmy/{id} { allow read: if true; allow write: if kadra() || zastepowy(); }
+    match /akcje/{id}  { allow read: if true; allow write: if kadra(); }
+    match /alarmy/{id} { allow read: if true; allow write: if kadra(); }
   }
 }
