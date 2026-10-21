@@ -4,7 +4,8 @@ service cloud.firestore {
     function signed() { return request.auth != null; }
     function hasProfile() { return signed() && exists(/databases/$(db)/documents/users/$(request.auth.uid)); }
     function me() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
-    function kadra() { return hasProfile() && me().rola == 'kadra'; }
+    function admin() { return hasProfile() && me().rola == 'admin'; }
+    function kadra() { return hasProfile() && me().rola in ['kadra', 'admin']; }
     function zastepowy() { return hasProfile() && me().rola == 'zastepowy'; }
     function szeregowy() { return hasProfile() && me().rola == 'szeregowy'; }
     function mojZastep() { return me().zastep in ['Lisy', 'Łosie', 'Żubry', 'Rysie', 'Niedźwiedzie', 'Gronostaje']; }
@@ -12,10 +13,17 @@ service cloud.firestore {
 
     match /config/{d} { allow read: if true; allow write: if kadra(); }
 
+    // Konta: tylko administrator tworzy, zmienia i usuwa
     match /users/{uid} {
       allow read: if signed() && (request.auth.uid == uid || kadra());
-      allow create: if signed() && request.auth.uid == uid && request.resource.data.rola == 'brak';
-      allow update, delete: if kadra();
+      allow write: if admin();
+    }
+    match /loginy/{login} {
+      allow get: if true;
+      allow list, write: if admin();
+    }
+    match /sekrety/{uid} {
+      allow read, write: if admin();
     }
 
     match /zbiorkiZastepu/{id} {
