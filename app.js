@@ -108,13 +108,16 @@ function vWyniki() {
 function vZbiorki() {
   const list = S.zbiorki.filter(z => inQ(z.data));
   const mine = rola() === "zastepowy" ? S.profile.zastep : null;
-  const form = canEdit() ? `<div class="card"><h2>Zgłoś zbiórkę zastępu</h2><div class="row">
+  const noZ = rola() === "zastepowy" && !ZASTEPY.includes(mine);
+  const form = noZ ? `<div class="card"><h2>Zgłoś zbiórkę zastępu</h2><p class="err">Nie masz przypisanego zastępu. Poproś kadrę, żeby przypisała Ci zastęp w zakładce Użytkownicy.</p></div>`
+    : canEdit() ? `<div class="card"><h2>Zgłoś zbiórkę zastępu</h2><div class="row">
     <select id="zz" ${mine ? "disabled" : ""}>${ZASTEPY.map(z => `<option ${z === mine ? "selected" : ""}>${z}</option>`).join("")}</select>
     <input id="zd" type="date" value="${today()}"><input id="zo" placeholder="krótki opis (opcjonalnie)">
     <button class="pri" id="zadd">Zgłoś</button></div>
     <p class="mut">Zbiórka liczy się do punktacji dopiero po zatwierdzeniu przez kadrę. Liczy się jedna zbiórka na tydzień (pon–nd).</p></div>` : "";
   const badge = s => `<span class="badge ${s === "zatwierdzona" ? "ok" : s === "odrzucona" ? "no" : "w"}">${s}</span>`;
-  const rows = list.map(z => `<tr><td>${z.data}</td><td>${z.zastep}</td><td>${esc(z.opis)}</td><td>${badge(z.status)}</td><td>
+  const rows = list.map(z => `<tr><td>${z.data}</td><td>${isKadra() ? `<select data-zs="${z.id}">${ZASTEPY.includes(z.zastep) ? "" : `<option value="">⚠ wybierz</option>`}${ZASTEPY.map(x => `<option ${x === z.zastep ? "selected" : ""}>${x}</option>`).join("")}</select>`
+      : (ZASTEPY.includes(z.zastep) ? z.zastep : `<span class="err">brak zastępu</span>`)}</td><td>${esc(z.opis)}</td><td>${badge(z.status)}</td><td>
     ${isKadra() && z.status !== "zatwierdzona" ? `<button data-ok="${z.id}">✔ Zatwierdź</button>` : ""}
     ${isKadra() && z.status === "oczekuje" ? `<button data-no="${z.id}">✖</button>` : ""}
     ${(isKadra() || (z.zastep === mine && z.status === "oczekuje")) ? `<button class="del" data-del="${z.id}">Usuń</button>` : ""}</td></tr>`).join("");
@@ -122,9 +125,14 @@ function vZbiorki() {
     <tr><th>Data</th><th>Zastęp</th><th>Opis</th><th>Status</th><th></th></tr>${rows || `<tr><td colspan=5 class="mut">Brak zbiórek w tym kwartale</td></tr>`}</table></div></div>`;
 }
 binders.zbiorki = () => {
-  $("#zadd") && ($("#zadd").onclick = () => addDoc(collection(db, "zbiorkiZastepu"), {
-    zastep: rola() === "zastepowy" ? S.profile.zastep : $("#zz").value, data: $("#zd").value, opis: $("#zo").value,
-    status: "oczekuje", autor: S.user.uid, utworzono: serverTimestamp() }).catch(err));
+  $("#zadd") && ($("#zadd").onclick = () => {
+    const zastep = rola() === "zastepowy" ? S.profile.zastep : $("#zz").value, data = $("#zd").value;
+    if (!ZASTEPY.includes(zastep)) return alert("Wybierz zastęp");
+    if (!data) return alert("Wybierz datę");
+    addDoc(collection(db, "zbiorkiZastepu"), { zastep, data, opis: $("#zo").value,
+      status: "oczekuje", autor: S.user.uid, utworzono: serverTimestamp() }).then(() => { $("#zo").value = ""; }).catch(err); });
+  document.querySelectorAll("[data-zs]").forEach(el => el.onchange = () => el.value &&
+    updateDoc(doc(db, "zbiorkiZastepu", el.dataset.zs), { zastep: el.value }).catch(err));
   document.querySelectorAll("[data-ok]").forEach(b => b.onclick = () => updateDoc(doc(db, "zbiorkiZastepu", b.dataset.ok), { status: "zatwierdzona", zatwierdzil: S.user.uid }).catch(err));
   document.querySelectorAll("[data-no]").forEach(b => b.onclick = () => updateDoc(doc(db, "zbiorkiZastepu", b.dataset.no), { status: "odrzucona" }).catch(err));
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => confirm("Usunąć?") && deleteDoc(doc(db, "zbiorkiZastepu", b.dataset.del)).catch(err));
@@ -276,7 +284,7 @@ function vUsers() {
    <tr><th>Login</th><th>Imię</th><th>Rola</th><th>Zastęp</th></tr>
    ${S.users.map(u => `<tr><td>${esc(loginOf(u.email))}</td><td><input data-u="${u.id}" data-f="imie" value="${esc(u.imie)}"></td>
    <td><select data-u="${u.id}" data-f="rola">${["brak","zastepowy","kadra"].map(r => `<option ${u.rola === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
-   <td><select data-u="${u.id}" data-f="zastep"><option value="">–</option>${ZASTEPY.map(z => `<option ${u.zastep === z ? "selected" : ""}>${z}</option>`).join("")}</select></td></tr>`).join("")}
+   <td>${u.rola === "zastepowy" && !ZASTEPY.includes(u.zastep) ? `<span class="err">⚠ </span>` : ""}<select data-u="${u.id}" data-f="zastep"><option value="">–</option>${ZASTEPY.map(z => `<option ${u.zastep === z ? "selected" : ""}>${z}</option>`).join("")}</select></td></tr>`).join("")}
    </table></div></div>`;
 }
 binders.uzytkownicy = () => document.querySelectorAll("[data-u]").forEach(el => el.onchange = () =>
