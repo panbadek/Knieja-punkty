@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261021-233812";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261021-233812";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-003655";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-003655";
 
-const BUILD = "20261021-233812";
+const BUILD = "20261022-003655";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -63,13 +63,13 @@ onAuthStateChanged(auth, async u => {
   S.user = u; S.profile = null; S.secrets = {}; S.edit = null; S.view = null; S.photo = null; S.busy = false; usersUnsub?.(); usersUnsub = null; profUnsub?.(); profUnsub = null; secretsUnsub?.(); secretsUnsub = null;
   if (u) {
     const ref = doc(db, "users", u.uid);
-    profUnsub = onSnapshot(ref, d => { S.profile = d.data() || null;
+    profUnsub = onSnapshot(ref, d => { S.profile = d.data() || null; S.profErr = null;
       // Login zmieniony przez administratora: stary login już nie wpuszcza.
       if (S.typedLogin && S.profile?.login && S.profile.login !== S.typedLogin) { S.typedLogin = null; signOut(auth); alert("Zły login lub hasło."); return; }
       S.typedLogin = null;
       if (isAdmin() && !secretsUnsub) secretsUnsub = onSnapshot(collection(db, "sekrety"), s => { S.secrets = Object.fromEntries(s.docs.map(d => [d.id, d.data().haslo])); refresh(); }, () => {});
       if (isKadra() && !usersUnsub) usersUnsub = onSnapshot(collection(db, "users"), s => { S.users = s.docs.map(d => ({ id: d.id, ...d.data() })); refresh(); });
-      refresh(); });
+      refresh(); }, e => { S.profErr = e.code || String(e); render(); });
   }
   render();
 });
@@ -95,7 +95,9 @@ function quarterPicker() {
 function bindQuarter() { $("#qsel") && ($("#qsel").onchange = e => { S.q = +e.target.value; S._qset = true; render(); }); }
 
 function render() {
-  renderChrome(); const ver = $("#ver"); if (ver) ver.textContent = "wersja " + BUILD;
+  renderChrome(); const ver = $("#ver");
+  if (ver) ver.textContent = "wersja " + BUILD + (S.user ? ` · konto ${S.user.uid.slice(0, 6)} · ` + (S.profErr ? `błąd profilu: ${S.profErr}`
+    : !S.profile ? "brak profilu" : `rola: ${S.profile.rola} · admin: ${S.profile.admin === true ? "tak" : S.profile.admin === undefined ? "brak pola" : JSON.stringify(S.profile.admin)}`) : "") + (S.diag ? " · " + S.diag : "");
   const views = { wyniki: vWyniki, zbiorki: vZbiorki, akcje: vAkcje, alarmy: vAlarmy, ustawienia: vUstawienia, uzytkownicy: vUsers, login: vLogin };
   $("#main").innerHTML = (views[S.tab] || vWyniki)();
   bindQuarter(); (binders[S.tab] || (() => {}))();
@@ -122,8 +124,9 @@ binders.login = () => {
   $("#li").onclick = async () => {
     const login = normLogin($("#em").value); if (!login) return alert("Wpisz login");
     try {
-      const m = await getDoc(doc(db, "loginy", login));
-      const email = m.exists() ? m.data().email : login + DOMAIN;   // starsze konta: login = początek e-maila
+      let email = login + DOMAIN;                                   // starsze konta: login = początek e-maila
+      try { const m = await getDoc(doc(db, "loginy", login)); if (m.exists()) email = m.data().email; }
+      catch (e) { console.warn("loginy:", e.code); S.diag = "brak dostępu do 'loginy' (stare reguły?)"; }
       S.typedLogin = login;
       await signInWithEmailAndPassword(auth, email, $("#pw").value);
       S.tab = "wyniki"; render();
