@@ -3,7 +3,7 @@ export const ZASTEPY = ["Lisy","Łosie","Żubry","Rysie","Niedźwiedzie","Gronos
 export const DEFAULT_CONFIG = {
   base: 20, step: 0.2, mundur: 4,
   duze: [40,30,25,20,15,10], male: [20,15,13,11,9,6],
-  alarmProgi: [10,6,4,2], alarmBonus: [8,6,5,4,3,1],
+  alarmProgi: [10,6,4,2], alarmBonus: [8,6,5,4,3,1], alarmProgiMin: [20,40,60],
   liczebnosc: { Lisy:9, "Łosie":9, "Żubry":9, Rysie:9, "Niedźwiedzie":9, Gronostaje:9 },
   kwartaly: [
     { nazwa: "IV kw. 2026", start: "2026-10-01", end: "2026-12-31" },
@@ -69,19 +69,41 @@ export function akcjaPoints(cfg, a) {
 }
 
 // --- Alarm: osoby × punkty progu + bonus za kolejność zastępów (wg 1. osoby, remis = to samo miejsce)
-export function alarmPoints(cfg, al) {
+// Źródła: (1) zaakceptowane meldunki z aplikacji (czas meldunku względem startu alarmu),
+//         (2) osoby dopisane ręcznie przez kadrę (liczby w progach + minuta 1. osoby).
+export function alarmProgiMin(cfg, al) {
+  const pm = (al.progiMin && al.progiMin.length) ? al.progiMin : (cfg.alarmProgiMin || [20, 40, 60]);
+  return pm.map(Number);
+}
+export function progIndex(cfg, al, minute) {
+  const pm = alarmProgiMin(cfg, al);
+  let i = pm.findIndex(t => minute < t); if (i < 0) i = pm.length;
+  return Math.min(i, cfg.alarmProgi.length - 1);
+}
+export function meldMinute(al, m) {
+  if (m.czasMs == null || al.startMs == null) return null;
+  return Math.max(0, (m.czasMs - al.startMs) / 60000);
+}
+export function alarmPoints(cfg, al, meldunki = []) {
   const res = {};
-  const times = ZASTEPY.map(z => al.dane?.[z]?.pierwszy).filter(t => t !== "" && t != null).map(Number);
-  const uniq = [...new Set(times)].sort((a,b) => a-b);
+  const acc = meldunki.filter(m => m.alarmId === al.id && m.status === "zaakceptowany");
+  const first = {};
   for (const z of ZASTEPY) {
     const d = al.dane?.[z] || {};
-    const osoby = (d.liczby || []).reduce((s, c, i) => s + Number(c || 0) * Number(cfg.alarmProgi[i] || 0), 0);
-    let bonus = 0, miejsce = null;
-    if (d.pierwszy !== "" && d.pierwszy != null) {
-      miejsce = uniq.indexOf(Number(d.pierwszy)) + 1;
-      bonus = Number(cfg.alarmBonus[miejsce-1] || 0);
+    let osoby = (d.liczby || []).reduce((s, c, i) => s + Number(c || 0) * Number(cfg.alarmProgi[i] || 0), 0);
+    let meld = 0, f = (d.pierwszy !== "" && d.pierwszy != null) ? Number(d.pierwszy) : null;
+    for (const m of acc.filter(m => m.zastep === z)) {
+      const min = meldMinute(al, m); if (min == null) continue;
+      osoby += Number(cfg.alarmProgi[progIndex(cfg, al, min)] || 0); meld++;
+      if (f == null || min < f) f = min;
     }
-    res[z] = { osoby, bonus, miejsce, total: osoby + bonus };
+    first[z] = f;
+    res[z] = { osoby, meld, pierwszy: f, bonus: 0, miejsce: null };
+  }
+  const uniq = [...new Set(ZASTEPY.map(z => first[z]).filter(t => t != null))].sort((a, b) => a - b);
+  for (const z of ZASTEPY) {
+    if (first[z] != null) { res[z].miejsce = uniq.indexOf(first[z]) + 1; res[z].bonus = Number(cfg.alarmBonus[res[z].miejsce - 1] || 0); }
+    res[z].total = res[z].osoby + res[z].bonus;
   }
   return res;
 }
@@ -93,7 +115,7 @@ export function quarterTotals(cfg, q, data, todayStr) {
     const r = akcjaPoints(cfg, a); for (const z of ZASTEPY) t[z].akcje += r[z].total;
   }
   for (const al of data.alarmy.filter(a => inQ(a.data, q))) {
-    const r = alarmPoints(cfg, al); for (const z of ZASTEPY) t[z].alarmy += r[z].total;
+    const r = alarmPoints(cfg, al, data.meldunki || []); for (const z of ZASTEPY) t[z].alarmy += r[z].total;
   }
   for (const z of ZASTEPY) t[z].suma = t[z].zbiorki + t[z].akcje + t[z].alarmy;
   return t;

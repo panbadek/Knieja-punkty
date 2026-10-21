@@ -6,8 +6,10 @@ service cloud.firestore {
     function me() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data; }
     function kadra() { return hasProfile() && me().rola == 'kadra'; }
     function zastepowy() { return hasProfile() && me().rola == 'zastepowy'; }
+    function szeregowy() { return hasProfile() && me().rola == 'szeregowy'; }
+    function mojZastep() { return me().zastep in ['Lisy', 'Łosie', 'Żubry', 'Rysie', 'Niedźwiedzie', 'Gronostaje']; }
+    function alarm(id) { return get(/databases/$(db)/documents/alarmy/$(id)).data; }
 
-    // Wyniki i dane są publiczne do odczytu (profil z wynikami)
     match /config/{d} { allow read: if true; allow write: if kadra(); }
 
     match /users/{uid} {
@@ -29,5 +31,26 @@ service cloud.firestore {
 
     match /akcje/{id}  { allow read: if true; allow write: if kadra(); }
     match /alarmy/{id} { allow read: if true; allow write: if kadra(); }
+
+    match /meldunki/{id} {
+      allow read: if true;
+      allow create: if (szeregowy() || zastepowy()) && mojZastep()
+        && id == request.resource.data.alarmId + '_' + request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.zastep == me().zastep
+        && request.resource.data.status == 'oczekuje'
+        && request.resource.data.czas == request.time
+        && request.time.toMillis() >= alarm(request.resource.data.alarmId).startMs
+        && request.time.toMillis() < alarm(request.resource.data.alarmId).startMs + 86400000;
+      allow update: if kadra();
+      allow delete: if kadra() || (signed() && resource.data.uid == request.auth.uid && resource.data.status == 'oczekuje');
+    }
+
+    match /zdjecia/{id} {
+      allow read: if kadra() || (signed() && resource.data.uid == request.auth.uid);
+      allow create, update: if signed() && request.resource.data.uid == request.auth.uid
+        && id == request.resource.data.alarmId + '_' + request.auth.uid;
+      allow delete: if kadra() || (signed() && resource.data.uid == request.auth.uid);
+    }
   }
 }

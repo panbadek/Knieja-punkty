@@ -28,10 +28,20 @@ th{font-size:12px;color:var(--mut);font-weight:600}td.n,th.n{text-align:right}
 .rank{display:grid;gap:8px}.rank .it{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:10px;padding:10px;border-radius:10px;background:var(--acc2)}
 .rank .pos{font-weight:700;font-size:18px;text-align:center}.rank .pts{font-weight:700;font-size:18px}
 .fire{font-size:13px}.err{color:var(--warn)}
+td.act{white-space:nowrap}td.act button{margin:2px 2px 2px 0}
+.it2{padding:10px 0;border-bottom:1px solid var(--line);display:grid;gap:8px}.it2:last-of-type{border-bottom:0}
+button.big{font-size:17px;padding:12px 16px;width:100%}
+img.ph{max-width:100%;max-height:50vh;border-radius:10px;border:1px solid var(--line)}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+#modal[hidden]{display:none}#modal .box{background:var(--card);border-radius:12px;padding:12px;max-width:100%;max-height:100%;overflow:auto;display:grid;gap:10px}
+#modal img{max-width:100%;max-height:75vh;border-radius:8px}
+details summary{cursor:pointer;padding:6px 0}
 </style></head>
 <body>
 <header><div><h1>Punktacja zastępów</h1><small id="who">niezalogowany</small></div><div id="authbox"></div></header>
 <nav id="nav"></nav>
 <main id="main"><div class="card">Ładowanie…</div></main>
+<input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+<div id="modal" hidden></div>
 <script type="module" src="app.js"></script>
 </body></html>
