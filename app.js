@@ -4,10 +4,25 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js";
+import { firebaseConfig } from "./firebase-config.js?v=20261021-233812";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261021-233812";
 
+const BUILD = "20261021-233812";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
+
+// ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
+async function checkUpdate() {
+  try {
+    const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" }); if (!r.ok) return;
+    const { v } = await r.json();
+    if (v && v !== BUILD && BUILD !== "dev") {
+      const bar = document.getElementById("upd"); bar.hidden = false;
+      bar.onclick = () => location.replace(location.pathname + "?v=" + encodeURIComponent(v));
+    }
+  } catch (e) {}
+}
+setInterval(checkUpdate, 60000); document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
+setTimeout(checkUpdate, 3000);
 const S = { user: null, profile: null, cfg: DEFAULT_CONFIG, zbiorki: [], akcje: [], alarmy: [], meldunki: [], users: [],
   tab: "wyniki", q: 0, edit: null, view: null, photo: null, busy: false };
 const $ = s => document.querySelector(s);
@@ -80,7 +95,7 @@ function quarterPicker() {
 function bindQuarter() { $("#qsel") && ($("#qsel").onchange = e => { S.q = +e.target.value; S._qset = true; render(); }); }
 
 function render() {
-  renderChrome();
+  renderChrome(); const ver = $("#ver"); if (ver) ver.textContent = "wersja " + BUILD;
   const views = { wyniki: vWyniki, zbiorki: vZbiorki, akcje: vAkcje, alarmy: vAlarmy, ustawienia: vUstawienia, uzytkownicy: vUsers, login: vLogin };
   $("#main").innerHTML = (views[S.tab] || vWyniki)();
   bindQuarter(); (binders[S.tab] || (() => {}))();

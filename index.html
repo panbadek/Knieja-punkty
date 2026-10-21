@@ -36,6 +36,8 @@ img.ph{max-width:100%;max-height:50vh;border-radius:10px;border:1px solid var(--
 #modal[hidden]{display:none}#modal .box{background:var(--card);border-radius:12px;padding:12px;max-width:100%;max-height:100%;overflow:auto;display:grid;gap:10px}
 #modal img{max-width:100%;max-height:75vh;border-radius:8px}
 details summary{cursor:pointer;padding:6px 0}
+#upd{background:#e9b949;color:#2b2000;padding:10px 16px;font-weight:600;cursor:pointer;text-align:center}#upd[hidden]{display:none}
+footer#ver{text-align:center;padding:8px 16px 24px;font-size:12px}
 .row[hidden]{display:none}
 label.sw{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600}
 label.sw input{position:absolute;opacity:0;width:0;height:0}
@@ -45,10 +47,12 @@ label.sw input:checked+span{background:var(--acc)}label.sw input:checked+span::a
 label.sw input:disabled+span{opacity:.5}
 </style></head>
 <body>
+<div id="upd" hidden>🔄 Jest nowa wersja aplikacji — dotknij, aby odświeżyć</div>
 <header><div><h1>Punktacja zastępów</h1><small id="who">niezalogowany</small></div><div id="authbox"></div></header>
 <nav id="nav"></nav>
 <main id="main"><div class="card">Ładowanie…</div></main>
+<footer id="ver" class="mut"></footer>
 <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
 <div id="modal" hidden></div>
-<script type="module" src="app.js"></script>
+<script type="module" src="app.js?v=20261021-233812"></script>
 </body></html>
