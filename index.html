@@ -11,7 +11,7 @@
 </script>
 
 <title>Punktacja zastępów</title>
-<link rel="manifest" href="manifest.json?v=20261022-165527"><meta name="theme-color" content="#2f5d3a">
+<link rel="manifest" href="manifest.json?v=20261022-170251"><meta name="theme-color" content="#2f5d3a">
 <link rel="icon" href="favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
 <link rel="apple-touch-icon" href="icons/icon-180.png"><meta name="apple-mobile-web-app-title" content="Kniejapunkty">
 <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
@@ -63,6 +63,15 @@ footer#ver{text-align:center;padding:8px 16px 24px;font-size:12px}
 .hl-pts{font-weight:700;font-size:17px;white-space:nowrap;color:var(--acc)}.hl-pts.neg{color:var(--warn)}
 .hl .row{margin:4px 0 0}
 td.n{white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0}.lg{display:inline-flex;align-items:center;gap:6px;font-size:14px}
+.lg i,.tip i{display:inline-block;width:14px;height:3px;border-radius:2px}.lg b{font-weight:600}
+#chsvgbox svg{display:block;width:100%;height:auto;touch-action:pan-y}
+.viz .gl{stroke:var(--line);stroke-width:1}.viz .g0{stroke:var(--mut)}.viz .ax{fill:var(--mut);font-size:11px}
+.viz .cross{stroke:var(--mut);stroke-width:1;stroke-dasharray:3 3}.viz .dot{stroke:var(--card);stroke-width:2}
+.tip{position:absolute;top:6px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);pointer-events:none;min-width:130px}
+.tip div{display:flex;align-items:center;gap:6px}.tip span{margin-left:auto;font-weight:600;padding-left:10px}
+:root{--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300}
+@media (prefers-color-scheme:dark){:root{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300}}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:8px 0}
 .tile{background:var(--acc2);border-radius:10px;padding:10px 12px}.tile b{display:block;font-size:22px;margin:2px 0}
 .fld{border-bottom:1px solid var(--line);padding:8px 0}.fld:last-child{border-bottom:0}.fv{font-size:17px;font-weight:600}
@@ -83,5 +92,5 @@ label.sw input:disabled+span{opacity:.5}
 <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
 <input type="file" id="galleryInput" accept="image/*" hidden>
 <div id="modal" hidden></div>
-<script type="module" src="app.js?v=20261022-165527"></script>
+<script type="module" src="app.js?v=20261022-170251"></script>
 </body></html>

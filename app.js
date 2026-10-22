@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-165527";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-165527";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-170251";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-170251";
 
-const BUILD = "20261022-165527";
+const BUILD = "20261022-170251";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -51,17 +51,18 @@ const DAY_MS = 86400000;
 
 // ---------- dane na żywo
 // Podczas edycji formularza nie przerysowujemy strony (żeby nie gubić wpisywanych danych i kliknięć).
-const refresh = () => { if (!S.edit && !S.busy) render(); };
-onSnapshot(doc(db, "config", "main"), s => { S.cfg = { ...DEFAULT_CONFIG, ...(s.data() || {}) }; pickQuarter(); refresh(); });
+const refresh = () => { autoArchive(); if (!S.edit && !S.busy) render(); };
+S.loaded = {};
+onSnapshot(doc(db, "config", "main"), s => { S.cfg = { ...DEFAULT_CONFIG, ...(s.data() || {}) }; S.loaded.cfg = true; pickQuarter(); refresh(); });
 const live = (name, key, map = x => x) => onSnapshot(collection(db, name), s => {
-  S[key] = s.docs.map(d => map({ id: d.id, ...d.data() })).sort((a, b) => (b.data || "").localeCompare(a.data || "")); refresh();
+  S[key] = s.docs.map(d => map({ id: d.id, ...d.data() })).sort((a, b) => (b.data || "").localeCompare(a.data || "")); S.loaded[key] = true; refresh();
 }, e => console.warn(name, e));
 live("zbiorkiZastepu", "zbiorki"); live("akcje", "akcje"); live("alarmy", "alarmy");
 live("korekty", "korekty");
 live("meldunki", "meldunki", m => ({ ...m, czasMs: m.czas?.toMillis ? m.czas.toMillis() : (m.czas == null ? Date.now() : Number(m.czas)) }));
-let usersUnsub = null, profUnsub = null, secretsUnsub = null;
+let usersUnsub = null, profUnsub = null, secretsUnsub = null, archUnsub = null;
 onAuthStateChanged(auth, async u => {
-  S.user = u; S.profile = null; S.secrets = {}; S.edit = null; S.view = null; S.photo = null; S.busy = false; usersUnsub?.(); usersUnsub = null; profUnsub?.(); profUnsub = null; secretsUnsub?.(); secretsUnsub = null;
+  S.user = u; S.profile = null; S.secrets = {}; S.edit = null; S.view = null; S.photo = null; S.busy = false; usersUnsub?.(); usersUnsub = null; archUnsub?.(); archUnsub = null; S.archiwum = []; S.loaded.archiwum = false; profUnsub?.(); profUnsub = null; secretsUnsub?.(); secretsUnsub = null;
   if (u) {
     const ref = doc(db, "users", u.uid);
     profUnsub = onSnapshot(ref, d => { S.profile = d.data() || null; S.profErr = null;
@@ -70,6 +71,8 @@ onAuthStateChanged(auth, async u => {
       S.typedLogin = null;
       if (isAdmin() && !secretsUnsub) secretsUnsub = onSnapshot(collection(db, "sekrety"), s => { S.secrets = Object.fromEntries(s.docs.map(d => [d.id, d.data().haslo])); refresh(); }, () => {});
       if (isKadra() && !usersUnsub) usersUnsub = onSnapshot(collection(db, "users"), s => { S.users = s.docs.map(d => ({ id: d.id, ...d.data() })); refresh(); });
+      if (isKadra() && !archUnsub) archUnsub = onSnapshot(collection(db, "archiwum"), s => {
+        S.archiwum = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.start || "").localeCompare(a.start || "")); S.loaded.archiwum = true; autoArchive(); refresh(); }, e => console.warn("archiwum", e));
       refresh(); }, e => { S.profErr = e.code || String(e); render(); });
   }
   render();
@@ -138,6 +141,8 @@ binders.login = () => {
 // ---------- WYNIKI
 function vWyniki() {
   if (S.view?.kind === "hist") return vHist(null);
+  if (S.view?.kind === "chart") return vChart();
+  if (S.view?.kind === "arch") return vArch();
   const t = quarterTotals(S.cfg, quarter(), S, today());
   const order = [...ZASTEPY].sort((a, b) => t[b].suma - t[a].suma);
   let pos = 0, last = null;
@@ -147,10 +152,17 @@ function vWyniki() {
     <div class="pts">${frac(t[z].suma)}</div></div>`; }).join("");
   const det = ZASTEPY.map(z => `<details><summary><b>${z}</b> — historia streaka</summary><table><tr><th>Tydzień</th><th class="n">n</th><th class="n">Pkt</th><th></th></tr>
     ${t[z].log.map(l => `<tr><td>${plDay(l.tydzien)}</td><td class="n">${l.n}</td><td class="n">${frac(l.pkt)}</td><td class="mut">${l.info || ""}</td></tr>`).join("") || `<tr><td colspan=4 class="mut">brak</td></tr>`}</table></details>`).join("");
-  return `<div class="card"><h2>Ranking</h2>${quarterPicker()}${histBtn()}<div class="rank">${items}</div></div><div class="card"><h2>Szczegóły streaków</h2>${det}</div>`;
+  return `<div class="card"><h2>Ranking</h2>${quarterPicker()}<div class="row"><button id="chart">📈 Wykres punktacji</button>${isKadra() ? `<button id="hist">📜 Historia punktów</button><button id="arch">🗄 Archiwum kwartałów</button>` : ""}</div><div class="rank">${items}</div></div><div class="card"><h2>Szczegóły streaków</h2>${det}</div>`;
 }
 
-binders.wyniki = () => { if (S.view?.kind === "hist") return bindHist(null); bindHistBtn(); };
+binders.wyniki = () => {
+  if (S.view?.kind === "hist") return bindHist(null);
+  if (S.view?.kind === "chart") return bindChart();
+  if (S.view?.kind === "arch") return bindArch();
+  bindHistBtn();
+  $("#chart").onclick = () => { S.view = { kind: "chart" }; render(); };
+  $("#arch") && ($("#arch").onclick = () => { S.view = { kind: "arch" }; render(); });
+};
 
 // ---------- ZBIÓRKI ZASTĘPU
 function vZbiorki() {
@@ -561,8 +573,8 @@ const KAT = { zbiorki: "Zbiórki zastępu", akcje: "Zbiórki drużyny / biwaki",
 const sgn = x => (x > 0 ? "+" : "") + frac(x);
 const histBtn = () => isKadra() ? `<div class="row"><button id="hist">📜 Historia punktów</button></div>` : "";
 const bindHistBtn = () => { const b = $("#hist"); if (b) b.onclick = () => { S.view = { kind: "hist" }; render(); }; };
-function histEntries(kat) {
-  const q = quarter(), out = [];
+function histEntries(kat, q = quarter()) {
+  const out = [], inQ = d => d >= q.start && d <= q.end;
   if (!kat || kat === "zbiorki") {
     const st = streakPoints(S.cfg, q, S.zbiorki, S.akcje, today()), used = new Set();
     S.zbiorki.filter(z => z.status === "zatwierdzona" && inQ(z.data) && ZASTEPY.includes(z.zastep))
@@ -756,6 +768,170 @@ binders.ja = () => {
     S.busy = false; render();
   });
 };
+
+// ---------- WYKRES PUNKTACJI (narastająco w kwartale)
+const SERIES = ["s1", "s2", "s3", "s4", "s5", "s6"];          // kolory zastępów: stała kolejność (CSS --s1…--s6)
+const zColor = z => `var(--${SERIES[ZASTEPY.indexOf(z)]})`;
+function chartData(q) {
+  const ev = histEntries(null, q), end = today() < q.end ? today() : q.end;
+  const days = []; for (let t = parseD(q.start); t <= parseD(end); t += DAY_MS) days.push(fmtD(t));
+  const series = ZASTEPY.map(z => { let acc = 0; const byDay = {};
+    ev.filter(e => e.zastep === z).forEach(e => { byDay[e.data] = (byDay[e.data] || 0) + e.pkt; });
+    return { z, vals: days.map(d => (acc += byDay[d] || 0)) }; });
+  return { days, series };
+}
+const niceStep = max => { const raw = max / 5, p = Math.pow(10, Math.floor(Math.log10(raw || 1))); return [1, 2, 2.5, 5, 10].map(m => m * p).find(s => s >= raw) || p * 10; };
+function chartSvg(q, W) {
+  const { days, series } = chartData(q); if (!days.length) return `<p class="mut">Kwartał jeszcze się nie zaczął.</p>`;
+  const H = 260, L = 40, R = 14, T = 12, B = 28, w = W - L - R, h = H - T - B;
+  const maxV = Math.max(10, ...series.flatMap(s => s.vals)), minV = Math.min(0, ...series.flatMap(s => s.vals));
+  const step = niceStep(maxV - minV), top = Math.ceil(maxV / step) * step, bot = Math.floor(minV / step) * step;
+  const x = i => L + (days.length === 1 ? w / 2 : i * w / (days.length - 1)), y = v => T + h - (v - bot) / (top - bot || 1) * h;
+  let grid = ""; for (let v = bot; v <= top + 1e-9; v += step) grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="gl${v === 0 ? " g0" : ""}"/><text x="${L - 6}" y="${y(v) + 4}" class="ax" text-anchor="end">${Math.round(v)}</text>`;
+  let xt = ""; days.forEach((d, i) => { if (parseD(d) === monday(parseD(d)) || i === 0) { const lbl = d.slice(8, 10) + "." + d.slice(5, 7);
+    if (i === 0 || x(i) - x(0) > 34) xt += `<line x1="${x(i)}" x2="${x(i)}" y1="${T + h}" y2="${T + h + 4}" class="gl"/><text x="${x(i)}" y="${H - 8}" class="ax" text-anchor="middle">${lbl}</text>`; } });
+  const path = vals => vals.map((v, i) => (i ? `H${x(i).toFixed(1)}V${y(v).toFixed(1)}` : `M${x(0).toFixed(1)},${y(v).toFixed(1)}`)).join("");
+  const lines = series.map(s => `<path d="${path(s.vals)}" fill="none" stroke="${zColor(s.z)}" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="${x(days.length - 1)}" cy="${y(s.vals.at(-1))}" r="4.5" fill="${zColor(s.z)}" class="dot"/>`).join("");
+  return `<svg id="chsvg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Punkty zastępów narastająco w kwartale">
+    ${grid}${xt}${lines}<line id="chx" x1="0" x2="0" y1="${T}" y2="${T + h}" class="cross" visibility="hidden"/>
+    <rect x="${L}" y="${T}" width="${w}" height="${h}" fill="transparent" id="chhit"/></svg>`;
+}
+function vChart() {
+  const q = quarter(), { days, series } = chartData(q);
+  const last = series.map(s => ({ z: s.z, v: s.vals.at(-1) || 0 })).sort((a, b) => b.v - a.v);
+  const legend = ZASTEPY.map(z => `<span class="lg"><i style="background:${zColor(z)}"></i>${z} <b>${frac(series.find(s => s.z === z).vals.at(-1) || 0)}</b></span>`).join("");
+  const weeks = days.filter((d, i) => i === days.length - 1 || parseD(d) === monday(parseD(d)) + 6 * DAY_MS);
+  const table = `<details><summary class="mut">Pokaż dane w tabeli (stan na koniec każdego tygodnia)</summary><div class="scroll"><table>
+    <tr><th>Do dnia</th>${ZASTEPY.map(z => `<th class="n">${z}</th>`).join("")}</tr>
+    ${weeks.map(d => { const i = days.indexOf(d); return `<tr><td>${plDay(d)}</td>${series.map(s => `<td class="n">${frac(s.vals[i])}</td>`).join("")}</tr>`; }).join("")}</table></div></details>`;
+  return `<div class="card viz"><div class="row"><button id="back">← Ranking</button></div><h2>📈 Punkty zastępów w kwartale</h2>${quarterPicker()}
+    <div class="legend">${legend}</div><div id="chwrap" style="position:relative"><div id="chsvgbox"></div><div id="chtip" class="tip" hidden></div></div>
+    <p class="mut">Punkty narastająco — linia wznosi się w dniu, w którym zastęp zdobył punkty (zbiórka, akcja, alarm, korekta). Dotknij wykresu, żeby zobaczyć stan w danym dniu.</p>
+    ${table}<p class="mut">Prowadzi: <b>${last[0]?.z || "–"}</b> (${frac(last[0]?.v || 0)} pkt)</p></div>`;
+}
+function bindChart() {
+  $("#back").onclick = () => { S.view = null; render(); };
+  const box = $("#chsvgbox"), q = quarter();
+  const draw = () => {
+    box.innerHTML = chartSvg(q, Math.max(280, Math.floor(box.clientWidth)));
+    const svg = $("#chsvg"), hit = $("#chhit"), cx = $("#chx"), tip = $("#chtip"); if (!svg || !hit) return;
+    const { days, series } = chartData(q);
+    const show = ev => {
+      const r = svg.getBoundingClientRect(), W = +svg.getAttribute("width"), px = (ev.clientX - r.left) * W / r.width;
+      const L = 40, w = W - 40 - 14, i = Math.max(0, Math.min(days.length - 1, Math.round((px - L) / (w || 1) * (days.length - 1))));
+      const X = days.length === 1 ? L + w / 2 : L + i * w / (days.length - 1);
+      cx.setAttribute("x1", X); cx.setAttribute("x2", X); cx.setAttribute("visibility", "visible");
+      const rows = series.map(s => ({ z: s.z, v: s.vals[i] })).sort((a, b) => b.v - a.v);
+      tip.innerHTML = `<b>${plDay(days[i])}</b>` + rows.map(o => `<div><i style="background:${zColor(o.z)}"></i>${o.z}<span>${frac(o.v)}</span></div>`).join("");
+      tip.hidden = false; const tx = X * r.width / W; tip.style.left = Math.min(Math.max(0, tx + 12), r.width - tip.offsetWidth) + "px";
+      if (tx + 12 + tip.offsetWidth > r.width) tip.style.left = Math.max(0, tx - 12 - tip.offsetWidth) + "px";
+    };
+    hit.addEventListener("pointermove", show); hit.addEventListener("pointerdown", show);
+    hit.addEventListener("pointerleave", () => { tip.hidden = true; cx.setAttribute("visibility", "hidden"); });
+  };
+  draw(); clearTimeout(S._rz); window.onresize = () => { clearTimeout(S._rz); S._rz = setTimeout(() => { if (S.view?.kind === "chart") draw(); }, 200); };
+}
+
+// ---------- ARCHIWUM KWARTAŁÓW (kadra): zapis wyników po zakończeniu kwartału + eksport
+const qKey = q => `${q.start}_${q.end}`;
+const archAttempted = new Set();
+function autoArchive() {
+  if (!isKadra() || S.busy) return;
+  const need = ["cfg", "zbiorki", "akcje", "alarmy", "meldunki", "korekty", "archiwum"];
+  if (!need.every(k => S.loaded[k])) return;                 // dopiero gdy wszystkie dane są wczytane
+  for (const q of S.cfg.kwartaly) {
+    const k = qKey(q);
+    if (q.end < today() && !S.archiwum.some(a => a.id === k) && !archAttempted.has(k)) { archAttempted.add(k); saveArchive(q, true).catch(e => console.warn("archiwum", e)); }
+  }
+}
+function archiveData(q) {
+  const t = quarterTotals(S.cfg, q, S, today()), order = [...ZASTEPY].sort((a, b) => t[b].suma - t[a].suma);
+  const ranking = order.map(z => ({ zastep: z, miejsce: 1 + order.filter(x => t[x].suma > t[z].suma).length,
+    zbiorki: t[z].zbiorki, akcje: t[z].akcje, alarmy: t[z].alarmy, suma: t[z].suma, streak: t[z].streak }));
+  const historia = histEntries(null, q).map(e => ({ data: e.data, kat: e.kat, zastep: e.zastep, pkt: e.pkt, opis: e.opis, info: e.info }));
+  const c = S.cfg, punktacja = { base: c.base, step: c.step, mundur: c.mundur, duze: c.duze, male: c.male, alarmProgi: c.alarmProgi, alarmBonus: c.alarmBonus };
+  return { nazwa: q.nazwa, start: q.start, end: q.end, ranking, historia, punktacja, koncowy: q.end < today() };
+}
+async function saveArchive(q, auto) {
+  const d = archiveData(q);
+  await setDoc(doc(db, "archiwum", qKey(q)), clean({ ...d, auto: !!auto, zapisalImie: auto ? "automatycznie" : myName(), zapisal: S.user.uid })
+    ).then(() => updateDoc(doc(db, "archiwum", qKey(q)), { zapisano: serverTimestamp() }));
+}
+function vArch() {
+  if (!isKadra()) { S.view = null; return vWyniki(); }
+  const known = S.cfg.kwartaly.map(q => ({ q, a: S.archiwum.find(a => a.id === qKey(q)) }));
+  const extra = S.archiwum.filter(a => !S.cfg.kwartaly.some(q => qKey(q) === a.id));
+  const card = a => `<div class="card"><h3 style="margin-top:0">${esc(a.nazwa)} <span class="mut">${plDay(a.start)} – ${plDay(a.end)}</span></h3>
+    <p class="mut">${a.koncowy ? "Wyniki końcowe" : "⚠ Stan na dzień zapisu (kwartał jeszcze trwał)"} · zapisano ${plTs(a.zapisano)} · ${esc(a.zapisalImie || "")}</p>
+    <div class="scroll"><table><tr><th>#</th><th>Zastęp</th><th class="n">Razem</th><th class="n">Zbiórki</th><th class="n">Drużyna</th><th class="n">Alarmy</th></tr>
+    ${(a.ranking || []).map(r => `<tr><td>${r.miejsce}.</td><td><b>${esc(r.zastep)}</b></td><td class="n"><b>${frac(r.suma)}</b></td><td class="n">${frac(r.zbiorki)}</td><td class="n">${frac(r.akcje)}</td><td class="n">${frac(r.alarmy)}</td></tr>`).join("")}</table></div>
+    <details><summary class="mut">Historia punktów (${(a.historia || []).length} wpisów)</summary><div class="hlist">${(a.historia || []).map(e => `<div class="hl"><div class="hl-top"><span>${plDay(e.data)} · <b>${esc(e.zastep)}</b> · <span class="mut">${KAT[e.kat] || ""}</span></span><span class="hl-pts ${e.pkt < 0 ? "neg" : ""}">${sgn(e.pkt)}</span></div><div>${esc(e.opis)}</div><div class="mut">${esc(e.info)}</div></div>`).join("")}</div></details>
+    <div class="row"><button class="pri" data-xlsx="${a.id}">⬇ Excel</button><button data-print="${a.id}">🖨 Drukuj / PDF</button>
+    <button data-resave="${a.id}">🔄 Zapisz ponownie</button>${isAdmin() ? `<button class="del" data-adel="${a.id}">Usuń</button>` : ""}</div></div>`;
+  return `<div class="card"><div class="row"><button id="back">← Ranking</button></div><h2>🗄 Archiwum kwartałów</h2>
+    <p class="mut">Po zakończeniu kwartału jego wyniki zapisują się tu automatycznie (przy pierwszym otwarciu aplikacji przez kogoś z kadry). Zapis to „zdjęcie” wyników — późniejsze zmiany danych go nie zmieniają, chyba że klikniesz „Zapisz ponownie”.</p>
+    <div class="row"><select id="aq">${S.cfg.kwartaly.map((q, i) => `<option value="${i}">${esc(q.nazwa)}</option>`).join("")}</select><button id="asave">💾 Zapisz teraz wybrany kwartał</button></div></div>
+    ${known.filter(x => x.a).map(x => card(x.a)).join("")}${extra.map(card).join("")}
+    ${!S.archiwum.length ? `<div class="card"><p class="mut">Archiwum jest puste — pierwszy wpis pojawi się po zakończeniu kwartału.</p></div>` : ""}`;
+}
+function bindArch() {
+  $("#back").onclick = () => { S.view = null; render(); };
+  const find = id => S.archiwum.find(a => a.id === id);
+  $("#asave").onclick = async () => { const q = S.cfg.kwartaly[+$("#aq").value];
+    if (S.archiwum.some(a => a.id === qKey(q)) && !confirm(`Nadpisać zapisane wyniki „${q.nazwa}” obecnymi danymi?`)) return;
+    try { await saveArchive(q, false); } catch (e) { err(e); } };
+  $$("[data-resave]").forEach(b => b.onclick = async () => { const a = find(b.dataset.resave), q = { nazwa: a.nazwa, start: a.start, end: a.end };
+    if (!confirm(`Zapisać „${a.nazwa}” ponownie z obecnych danych? Poprzedni zapis zostanie zastąpiony.`)) return;
+    try { await saveArchive(q, false); } catch (e) { err(e); } });
+  $$("[data-adel]").forEach(b => b.onclick = () => confirm("Usunąć ten zapis z archiwum?") && deleteDoc(doc(db, "archiwum", b.dataset.adel)).catch(err));
+  $$("[data-xlsx]").forEach(b => b.onclick = async () => { const a = find(b.dataset.xlsx); b.disabled = true;
+    try { saveBlob(await archXlsx(a), `Punktacja ${safe(a.nazwa)}.xlsx`); } catch (e) { err(e); } b.disabled = false; });
+  $$("[data-print]").forEach(b => b.onclick = () => printArch(find(b.dataset.print)));
+}
+// --- eksport do Excela (.xlsx budowany ręcznie, pakowany JSZip)
+const xe = v => String(v ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function sheetXml(rows, widths) {
+  const col = i => { let s = ""; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+  const cell = (v, r, c, head) => { const ref = col(c) + (r + 1), st = head ? ' s="1"' : (typeof v === "number" ? ' s="2"' : "");
+    return typeof v === "number" && isFinite(v) ? `<c r="${ref}"${st}><v>${Math.round(v * 1e6) / 1e6}</v></c>` : `<c r="${ref}" t="inlineStr"${st}><is><t xml:space="preserve">${xe(v)}</t></is></c>`; };
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+    <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+    <cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols>
+    <sheetData>${rows.map((row, r) => `<row r="${r + 1}">${row.map((v, c) => cell(v, r, c, r === 0)).join("")}</row>`).join("")}</sheetData></worksheet>`;
+}
+async function archXlsx(a) {
+  const JSZip = await loadJSZip(), zip = new JSZip();
+  const sheets = [
+    ["Ranking", [["Miejsce", "Zastęp", "Zbiórki zastępu", "Zbiórki drużyny / biwaki", "Alarmy", "Razem", "Streak (tyg.)"],
+      ...(a.ranking || []).map(r => [r.miejsce, r.zastep, r.zbiorki, r.akcje, r.alarmy, r.suma, r.streak])], [9, 16, 16, 24, 10, 10, 12]],
+    ["Historia", [["Data", "Kategoria", "Zastęp", "Punkty", "Za co", "Szczegóły"],
+      ...(a.historia || []).slice().sort((x, y) => x.data.localeCompare(y.data)).map(e => [plDay(e.data), KAT[e.kat] || e.kat, e.zastep, e.pkt, e.opis, e.info])], [12, 24, 14, 9, 40, 50]],
+    ["Informacje", [["Pole", "Wartość"], ["Kwartał", a.nazwa], ["Od", plDay(a.start)], ["Do", plDay(a.end)], ["Status", a.koncowy ? "wyniki końcowe" : "stan na dzień zapisu"],
+      ["Zapisano", plTs(a.zapisano)], ["Zapisał(a)", a.zapisalImie || ""], ["Pkt bazowe za zbiórkę", a.punktacja?.base], ["Przyrost streaka", a.punktacja?.step], ["Pkt za mundur", a.punktacja?.mundur]], [24, 30]]];
+  zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`);
+  zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+  zip.file("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map(([n], i) => `<sheet name="${xe(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`);
+  zip.file("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+  zip.file("xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.##"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFD9E1D2"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>`);
+  sheets.forEach(([, rows, widths], i) => zip.file(`xl/worksheets/sheet${i + 1}.xml`, sheetXml(rows, widths)));
+  return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+// --- wydruk / PDF
+function printArch(a) {
+  const w = window.open("", "_blank"); if (!w) return alert("Przeglądarka zablokowała nowe okno — zezwól na wyskakujące okna.");
+  w.document.write(`<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Punktacja ${xe(a.nazwa)}</title><style>
+    body{font:14px/1.4 Arial,sans-serif;margin:24px;color:#111}h1{font-size:20px;margin:0 0 4px}p{color:#555;margin:0 0 14px}
+    table{border-collapse:collapse;width:100%;margin-bottom:22px}th,td{border:1px solid #ccc;padding:5px 7px;text-align:left}th{background:#eef2ea}td.n{text-align:right}
+    h2{font-size:16px;margin:18px 0 6px}</style></head><body>
+    <h1>Punktacja zastępów — ${xe(a.nazwa)}</h1><p>${plDay(a.start)} – ${plDay(a.end)} · ${a.koncowy ? "wyniki końcowe" : "stan na dzień zapisu"} · zapisano ${xe(plTs(a.zapisano))}</p>
+    <h2>Ranking</h2><table><tr><th>Miejsce</th><th>Zastęp</th><th>Zbiórki zastępu</th><th>Zbiórki drużyny / biwaki</th><th>Alarmy</th><th>Razem</th></tr>
+    ${(a.ranking || []).map(r => `<tr><td>${r.miejsce}.</td><td><b>${xe(r.zastep)}</b></td><td class="n">${frac(r.zbiorki)}</td><td class="n">${frac(r.akcje)}</td><td class="n">${frac(r.alarmy)}</td><td class="n"><b>${frac(r.suma)}</b></td></tr>`).join("")}</table>
+    <h2>Historia punktów</h2><table><tr><th>Data</th><th>Zastęp</th><th>Kategoria</th><th>Za co</th><th>Pkt</th></tr>
+    ${(a.historia || []).slice().sort((x, y) => x.data.localeCompare(y.data)).map(e => `<tr><td>${plDay(e.data)}</td><td>${xe(e.zastep)}</td><td>${xe(KAT[e.kat] || "")}</td><td>${xe(e.opis)}<br><small>${xe(e.info)}</small></td><td class="n">${xe(sgn(e.pkt))}</td></tr>`).join("")}</table>
+    <script>window.onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
+  w.document.close();
+}
 
 // ---------- USTAWIENIA (kadra)
 function vUstawienia() {
