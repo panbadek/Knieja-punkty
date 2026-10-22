@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-103135";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-103135";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-104447";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-104447";
 
-const BUILD = "20261022-103135";
+const BUILD = "20261022-104447";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -261,9 +261,15 @@ function vAkcjaEdit() {
     <button class="del" data-rm="gry.${i}">Usuń grę</button></h3>
     <div class="scroll"><table>${head()}${numRow("Miejsce (remis = to samo)", z => g.miejsca?.[z], z => `gry.${i}.miejsca.${z}`, "–")}</table></div>`).join("");
   const mund = a.mundury.map((m, i) => `<h3><input data-p="mundury.${i}.nazwa" value="${esc(m.nazwa)}" placeholder="Sprawdzanie munduru ${i + 1}">
-    <button class="del" data-rm="mundury.${i}">Usuń</button></h3><div class="scroll"><table>${head()}
+    <button class="del" data-rm="mundury.${i}">Usuń</button></h3>
+    <div class="row"><label>Punkty dziel przez: <select data-p="mundury.${i}.dziel" data-dziel="${i}">
+      ${[["obecni", "obecnych na zbiórce"], ["liczebnosc", "liczebność zastępu"], ["wlasne", "własną liczbę"]].map(([v, l]) =>
+        `<option value="${v}" ${(m.dziel || "obecni") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+    <div class="scroll"><table>${head()}
     ${numRow("Obecni przy sprawdzaniu", z => m.dane?.[z]?.h, z => `mundury.${i}.dane.${z}.h`, z => a.wyniki?.[z]?.hob ?? "")}
-    ${numRow("Liczba błędów", z => m.dane?.[z]?.b, z => `mundury.${i}.dane.${z}.b`)}</table></div>`).join("");
+    ${numRow("Liczba błędów", z => m.dane?.[z]?.b, z => `mundury.${i}.dane.${z}.b`)}
+    ${numRow("Dzielnik (własny)", z => m.dane?.[z]?.d, z => `mundury.${i}.dane.${z}.d`, "auto")
+      .replace("<tr>", `<tr data-wlasne="${i}" ${(m.dziel || "obecni") === "wlasne" ? "" : "hidden"}>`)}</table></div>`).join("");
   return `<div class="card"><h2>${S.edit.id ? "Edycja akcji" : "Nowa zbiórka drużyny / biwak"}</h2>
    <div class="row"><select data-p="typ"><option value="zbiorka" ${a.typ === "zbiorka" ? "selected" : ""}>Zbiórka drużyny</option><option value="biwak" ${a.typ === "biwak" ? "selected" : ""}>Biwak</option></select>
    <input type="date" data-p="data" value="${a.data}"><input data-p="nazwa" value="${esc(a.nazwa)}" placeholder="Nazwa"></div>
@@ -272,18 +278,20 @@ function vAkcjaEdit() {
    ${numRow("Obecni (hob)", z => a.wyniki?.[z]?.hob, z => `wyniki.${z}.hob`)}</table></div>
    <p class="mut">Puste h = liczebność z ustawień.</p>
    <h3>Gry</h3>${gry}<div class="row"><button id="gAdd">+ Gra duża</button><button id="mAdd">+ Gra mała</button></div>
-   <h3>Umundurowanie</h3><p class="mut">Liczba obecnych przy sprawdzaniu jest domyślnie taka jak obecnych na zbiórce (szara podpowiedź). Wpisz inną, jeśli się różni; wyczyść pole, żeby wrócić do domyślnej.</p>${mund}<div class="row"><button id="uAdd">+ Sprawdzanie munduru</button></div>
+   <h3>Umundurowanie</h3><p class="mut">Punkty = (${S.cfg.mundur} × obecni przy sprawdzaniu − błędy) ÷ wybrany dzielnik. Liczba obecnych przy sprawdzaniu jest domyślnie taka jak obecnych na zbiórce (szara podpowiedź) — wpisz inną, jeśli się różni; wyczyść pole, żeby wrócić do domyślnej. Pusty dzielnik własny („auto”) = obecni przy sprawdzaniu.</p>${mund}<div class="row"><button id="uAdd">+ Sprawdzanie munduru</button></div>
    <h3>Podgląd punktów</h3><div class="scroll" id="pv">${akcjaPreview()}</div>
    <div class="row"><button class="pri" id="save">Zapisz</button><button id="cancel">Anuluj</button>${S.edit.id ? `<button class="del" id="remove">Usuń akcję</button>` : ""}</div></div>`;
 }
 function bindAkcjaEdit() {
   bindEditor(akcjaPreview); const a = S.edit.d;
+  $$("[data-dziel]").forEach(el => el.addEventListener("change", () => {
+    const tr = document.querySelector(`[data-wlasne="${el.dataset.dziel}"]`); if (tr) tr.hidden = el.value !== "wlasne"; }));
   // zmiana obecnych na zbiórce od razu zmienia podpowiedź w sprawdzaniu munduru
   ZASTEPY.forEach(z => { const el = document.querySelector(`[data-p="wyniki.${z}.hob"]`);
     el && el.addEventListener("input", () => $$(`[data-p^="mundury."][data-p$=".dane.${z}.h"]`).forEach(x => x.placeholder = el.value)); });
   $("#gAdd").onclick = () => { a.gry.push({ nazwa: "", rodzaj: "duza", miejsca: {} }); render(); };
   $("#mAdd").onclick = () => { a.gry.push({ nazwa: "", rodzaj: "mala", miejsca: {} }); render(); };
-  $("#uAdd").onclick = () => { a.mundury.push({ nazwa: "", dane: {} }); render(); };
+  $("#uAdd").onclick = () => { a.mundury.push({ nazwa: "", dziel: "obecni", dane: {} }); render(); };
   $("#save").onclick = () => { if (!S.edit.d.data) return alert("Wybierz datę"); saveDoc("akcje"); };
   $("#remove") && ($("#remove").onclick = () => confirm("Usunąć akcję?") && deleteDoc(doc(db, "akcje", S.edit.id)).then(() => { S.edit = null; render(); }).catch(err));
 }

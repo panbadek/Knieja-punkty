@@ -47,6 +47,7 @@ export function streakPoints(cfg, q, zbiorki, akcje, todayStr) {
 }
 
 // --- Akcja drużyny (zbiórka / biwak)
+const empty = v => v === null || v === undefined || v === "";
 export function akcjaPoints(cfg, a) {
   const res = {};
   for (const z of ZASTEPY) {
@@ -60,8 +61,12 @@ export function akcjaPoints(cfg, a) {
     let mund = 0;
     for (const m of a.mundury || []) {
       // obecni przy sprawdzaniu: domyślnie = obecni na zbiórce (hob), chyba że wpisano inaczej
-      const d = m.dane?.[z] || {}; const hm = (d.h === null || d.h === undefined || d.h === "") ? hob : Number(d.h);
-      if (hm > 0) mund += (cfg.mundur * hm - Number(d.b || 0)) / hm;
+      const d = m.dane?.[z] || {}; const hm = empty(d.h) ? hob : Number(d.h);
+      if (!(hm > 0)) continue;
+      // dzielnik wybrany przez wypełniającego: liczebność zastępu / obecni na zbiórce / własna liczba
+      const tryb = m.dziel || "obecni";
+      let div = tryb === "liczebnosc" ? h : tryb === "wlasne" ? (empty(d.d) ? hm : Number(d.d)) : (hob > 0 ? hob : hm);
+      if (div > 0) mund += (cfg.mundur * hm - Number(d.b || 0)) / div;
     }
     const gryPrzel = h > 0 ? gry * hob / h : 0;
     res[z] = { gry, gryPrzel, mund, total: gryPrzel + mund, h, hob };
