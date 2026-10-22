@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-201221";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts } from "./scoring.js?v=20261022-201221";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-203450";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts } from "./scoring.js?v=20261022-203450";
 
-const BUILD = "20261022-201221";
+const BUILD = "20261022-203450";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -1017,18 +1017,31 @@ const loginTaken = async (login, exceptId) => {
 const genPass = () => { const a = "abcdefghjkmnpqrstuvwxyz23456789"; return Array.from({ length: 8 }, () => a[Math.floor(Math.random() * a.length)]).join(""); };
 const emptyUser = () => ({ imie: "", login: "", haslo: genPass(), rola: "szeregowy", zastep: "" });
 
+// Sortowanie kont: funkcja (kadra → zastępowi → szeregowi), zastęp (kolejność zastępów, w środku zastępowy pierwszy), imię
+try { S.uSort = localStorage.getItem("uSort") || "funkcja"; } catch (e) { S.uSort = "funkcja"; }
+const ROLE_ORDER = { admin: 0, kadra: 0, zastepowy: 1, szeregowy: 2 };
+function sortUsers(list, by) {
+  const r = u => ROLE_ORDER[u.rola] ?? 9, z = u => ZASTEPY.includes(u.zastep) ? ZASTEPY.indexOf(u.zastep) : 99;
+  const name = (a, b) => (a.imie || "").localeCompare(b.imie || "", "pl");
+  const cmp = { funkcja: (a, b) => r(a) - r(b) || (isAdm(b) - isAdm(a)) || z(a) - z(b) || name(a, b),
+                zastep: (a, b) => z(a) - z(b) || r(a) - r(b) || name(a, b),
+                imie: name }[by] || name;
+  return [...list].sort(cmp);
+}
 function vUsers() {
   if (!isKadra()) return `<div class="card"><p class="err">Tylko kadra ma dostęp do kont.</p></div>`;
   if (S.edit?.kind === "user") return vUserEdit();
   const adm = isAdmin();
-  const users = [...S.users].sort((a, b) => (a.zastep || "~").localeCompare(b.zastep || "~") || (a.imie || "").localeCompare(b.imie || ""));
-  return `<div class="card"><h2>Konta</h2>${adm ? `<div class="row"><button class="pri" id="unew">+ Nowe konto</button></div>` : ""}
+  const users = sortUsers(S.users, S.uSort);
+  return `<div class="card"><h2>Konta <span class="badge">${users.length}</span></h2>${adm ? `<div class="row"><button class="pri" id="unew">+ Nowe konto</button></div>` : ""}
+   <div class="row"><span class="mut">Sortuj:</span>${[["funkcja", "funkcja"], ["zastep", "zastęp"], ["imie", "imię i nazwisko"]].map(([v, l]) =>
+     `<button data-usort="${v}" class="${S.uSort === v ? "on" : ""}">${l}</button>`).join("")}</div>
    <div class="scroll"><table><tr><th>Imię i nazwisko</th><th>Login</th>${adm ? "<th>Hasło</th>" : ""}<th>Funkcja</th><th>Zastęp</th><th></th></tr>
    ${users.map(u => `<tr><td>${esc(u.imie)}${u.id === S.user.uid ? ` <span class="badge">Ty</span>` : ""}</td><td>${esc(loginOfUser(u))}</td>
    ${adm ? `<td>${S.secrets?.[u.id] ? `<button data-show="${u.id}" class="mut">pokaż</button>` : `<span class="mut">nieznane</span>`}</td>` : ""}
    <td>${ROLE_PL[u.rola] || `<span class="err">${esc(u.rola || "brak")}</span>`}${isAdm(u) ? ` <span class="badge ok">🛡 admin</span>` : ""}</td>
    <td>${ZASTEPY.includes(u.zastep) ? u.zastep : (["zastepowy", "szeregowy"].includes(u.rola) ? `<span class="err">⚠ brak</span>` : "–")}</td>
-   <td><button data-ue="${u.id}">Edytuj</button></td></tr>`).join("")}</table></div>
+   <td><button data-ue="${u.id}" title="Edytuj" aria-label="Edytuj">✎</button></td></tr>`).join("")}</table></div>
    <p class="mut">Kadra zmienia funkcję i zastęp. Administrator dodatkowo zakłada i usuwa konta, zmienia imię i nazwisko, login, hasło i uprawnienia administratora. Hasło każdy może też zmienić sam w zakładce „👤 Ja”.</p></div>`;
 }
 function vUserEdit() {
@@ -1060,6 +1073,7 @@ function vUserEdit() {
 binders.uzytkownicy = () => {
   if (!isKadra()) return;
   if (S.edit?.kind === "user") return bindUserEdit();
+  $$("[data-usort]").forEach(b => b.onclick = () => { S.uSort = b.dataset.usort; try { localStorage.setItem("uSort", S.uSort); } catch (e) {} render(); });
   $("#unew") && ($("#unew").onclick = () => { S.edit = { kind: "user", d: emptyUser() }; render(); });
   $$("[data-ue]").forEach(b => b.onclick = () => { const u = S.users.find(x => x.id === b.dataset.ue);
     S.edit = { kind: "user", id: u.id, d: { ...u, login: loginOfUser(u), rola: u.rola === "admin" ? "kadra" : u.rola, admin: isAdm(u) } }; render(); });
