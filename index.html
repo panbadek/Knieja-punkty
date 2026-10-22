@@ -3,7 +3,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 
 <title>Punktacja zastępów</title>
-<link rel="manifest" href="manifest.json?v=20261022-215146"><meta name="theme-color" content="#2f5d3a">
+<link rel="manifest" href="manifest.json?v=20261023-002516"><meta name="theme-color" content="#2f5d3a">
 <link rel="icon" href="favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
 <link rel="apple-touch-icon" href="icons/icon-180.png"><meta name="apple-mobile-web-app-title" content="Kniejapunkty">
 <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
@@ -21,7 +21,7 @@ main{max-width:900px;margin:0 auto;padding:16px}
 h2{font-size:17px;margin:0 0 10px}h3{font-size:15px;margin:14px 0 6px}
 button{font:inherit;border:1px solid var(--line);background:var(--acc2);color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
 button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}@media (prefers-color-scheme:dark){button.pri{color:#0f1410}}
-button.on{outline:2px solid var(--acc)}.gw{color:var(--gold);white-space:nowrap;letter-spacing:1px}button.del{color:var(--warn)}
+button.on{outline:2px solid var(--acc)}.gw{color:var(--gold);white-space:nowrap;letter-spacing:1px}.chks{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:2px 12px}label.chk{display:flex;gap:8px;align-items:center;padding:5px 0}label.chk input{width:18px;height:18px}button.del{color:var(--warn)}
 input,select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);max-width:100%}
 input[type=number]{width:70px}
 table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:6px 5px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
@@ -48,7 +48,7 @@ a.btn{display:inline-block;text-decoration:none;font:inherit;border:1px solid va
 a.btn.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
 #upd{background:#e9b949;color:#2b2000;padding:10px 16px;font-weight:600;cursor:pointer;text-align:center}#upd[hidden]{display:none}
 footer#ver{text-align:center;padding:8px 16px 24px;font-size:12px}
-.row[hidden],tr[hidden]{display:none}
+[hidden]{display:none!important}
 .za{border-top:1px dashed var(--line);margin-top:8px;padding-top:8px;display:grid;gap:4px}
 .hlist{display:grid;gap:8px;margin:8px 0}
 .hl{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:3px}
@@ -86,5 +86,5 @@ label.sw input:disabled+span{opacity:.5}
 <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
 <input type="file" id="galleryInput" accept="image/*" hidden>
 <div id="modal" hidden></div>
-<script type="module" src="app.js?v=20261022-215146"></script>
+<script type="module" src="app.js?v=20261023-002516"></script>
 </body></html>

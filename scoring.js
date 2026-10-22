@@ -119,7 +119,11 @@ export function alarmPoints(cfg, al, meldunki = []) {
 }
 
 // --- Sprawności: punkty za przyznaną sprawność wg liczby gwiazdek
-export function sprawPts(cfg, s) { const p = cfg.sprawPkt || DEFAULT_CONFIG.sprawPkt; return Number(p[Number(s.gwiazdki) - 1] || 0); }
+// Cały zastęp zdobył sprawność na zbiórce: liczy się tak, jakby każdy uczestnik zdobył ją 2 razy.
+export function sprawPts(cfg, s) {
+  const p = cfg.sprawPkt || DEFAULT_CONFIG.sprawPkt, one = Number(p[Number(s.gwiazdki) - 1] || 0);
+  return s.caly ? one * 2 * (s.uczestnicy || []).length : one;
+}
 
 export function quarterTotals(cfg, q, data, todayStr) {
   const st = streakPoints(cfg, q, data.zbiorki, data.akcje, todayStr);

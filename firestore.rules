@@ -79,6 +79,7 @@ service cloud.firestore {
         && request.resource.data.gwiazdki in [1, 2, 3]
         && request.resource.data.autor == request.auth.uid
         && request.resource.data.utworzono == request.time
+        && (request.resource.data.get('caly', false) == false || zastepowy())   // „cały zastęp” zgłasza tylko zastępowy
         && (((szeregowy() || zastepowy()) && request.resource.data.uid == request.auth.uid)
           || (zastepowy() && zMojegoZastepu(request.resource.data.uid))));
       allow update: if kadra();
