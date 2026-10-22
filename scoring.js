@@ -1,7 +1,7 @@
 // Czysta logika punktacji — bez Firebase, łatwa do testowania.
 export const ZASTEPY = ["Lisy","Łosie","Żubry","Rysie","Niedźwiedzie","Gronostaje"];
 export const DEFAULT_CONFIG = {
-  base: 20, step: 0.2, mundur: 4,
+  base: 20, step: 0.2, przyrost: 4, mundur: 4,
   duze: [40,30,25,20,15,10], male: [20,15,13,11,9,6],
   alarmProgi: [10,6,4,2], alarmBonus: [8,6,5,4,3,1], alarmProgiMin: [20,40,60],
   liczebnosc: { Lisy:9, "Łosie":9, "Żubry":9, Rysie:9, "Niedźwiedzie":9, Gronostaje:9 },
@@ -21,6 +21,10 @@ const inQ = (s, q) => s >= q.start && s <= q.end;
 const hOf = (cfg, z, over) => Number(over ?? cfg.liczebnosc?.[z] ?? 0);
 
 // --- Zbiórki zastępu ze streakiem
+// Przyrost streaka w punktach (np. +4 pkt za każdą kolejną zbiórkę). Starsze ustawienia: mnożnik × punkty bazowe.
+export function streakInc(cfg) { return (cfg.przyrost !== undefined && cfg.przyrost !== null && cfg.przyrost !== "") ? Number(cfg.przyrost) : cfg.base * cfg.step; }
+// Punkty za n-tą zbiórkę z rzędu: bazowe + (n − 1) × przyrost  (np. 20, 24, 28, 32…)
+export function zbiorkaPts(cfg, n) { return Number(cfg.base) + (n - 1) * streakInc(cfg); }
 export function streakPoints(cfg, q, zbiorki, akcje, todayStr) {
   const out = {};
   const qs = parseD(q.start), qe = parseD(q.end), today = parseD(todayStr);
@@ -32,7 +36,7 @@ export function streakPoints(cfg, q, zbiorki, akcje, todayStr) {
     for (let w = monday(qs); w <= qe && w <= today; w += 7*DAY) {
       const weekEnd = w + 6*DAY;
       if (meetWeeks.has(w)) {
-        n++; const p = cfg.base * (1 + (n-1) * cfg.step); total += p;
+        n++; const p = zbiorkaPts(cfg, n); total += p;
         log.push({ tydzien: fmtD(w), n, pkt: p });
       } else if (teamWeeks.has(w)) {
         log.push({ tydzien: fmtD(w), n, pkt: 0, info: "akcja drużyny — streak zamrożony" });

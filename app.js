@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-174615";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-174615";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-201221";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts } from "./scoring.js?v=20261022-201221";
 
-const BUILD = "20261022-174615";
+const BUILD = "20261022-201221";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -714,7 +714,7 @@ function vJa() {
     const wk = fmtD(monday(parseD(today())));
     const doneThisWeek = zb.some(x => fmtD(monday(parseD(x.data))) === wk);
     const pendThisWeek = S.zbiorki.some(x => x.zastep === z && x.status === "oczekuje" && fmtD(monday(parseD(x.data))) === wk);
-    const n = t[z].streak, next = S.cfg.base * (1 + n * S.cfg.step);
+    const n = t[z].streak, next = zbiorkaPts(S.cfg, n + 1);
     const al = S.alarmy.filter(a => inQq(a.data));
     const alDone = al.filter(a => S.meldunki.some(m => m.alarmId === a.id && m.zastep === z && m.status === "zaakceptowany")).length;
     const meldOk = S.meldunki.filter(m => m.zastep === z && m.status === "zaakceptowany" && al.some(a => a.id === m.alarmId)).length;
@@ -856,7 +856,7 @@ function archiveData(q) {
   const ranking = order.map(z => ({ zastep: z, miejsce: 1 + order.filter(x => t[x].suma > t[z].suma).length,
     zbiorki: t[z].zbiorki, akcje: t[z].akcje, alarmy: t[z].alarmy, suma: t[z].suma, streak: t[z].streak }));
   const historia = histEntries(null, q).map(e => ({ data: e.data, kat: e.kat, zastep: e.zastep, pkt: e.pkt, opis: e.opis, info: e.info }));
-  const c = S.cfg, punktacja = { base: c.base, step: c.step, mundur: c.mundur, duze: c.duze, male: c.male, alarmProgi: c.alarmProgi, alarmBonus: c.alarmBonus };
+  const c = S.cfg, punktacja = { base: c.base, przyrost: streakInc(c), mundur: c.mundur, duze: c.duze, male: c.male, alarmProgi: c.alarmProgi, alarmBonus: c.alarmBonus };
   return { nazwa: q.nazwa, start: q.start, end: q.end, ranking, historia, punktacja, koncowy: q.end < today() };
 }
 async function saveArchive(q, auto) {
@@ -914,7 +914,7 @@ async function archXlsx(a) {
     ["Historia", [["Data", "Kategoria", "Zastęp", "Punkty", "Za co", "Szczegóły"],
       ...(a.historia || []).slice().sort((x, y) => x.data.localeCompare(y.data)).map(e => [plDay(e.data), KAT[e.kat] || e.kat, e.zastep, e.pkt, e.opis, e.info])], [12, 24, 14, 9, 40, 50]],
     ["Informacje", [["Pole", "Wartość"], ["Kwartał", a.nazwa], ["Od", plDay(a.start)], ["Do", plDay(a.end)], ["Status", a.koncowy ? "wyniki końcowe" : "stan na dzień zapisu"],
-      ["Zapisano", plTs(a.zapisano)], ["Zapisał(a)", a.zapisalImie || ""], ["Pkt bazowe za zbiórkę", a.punktacja?.base], ["Przyrost streaka", a.punktacja?.step], ["Pkt za mundur", a.punktacja?.mundur]], [24, 30]]];
+      ["Zapisano", plTs(a.zapisano)], ["Zapisał(a)", a.zapisalImie || ""], ["Pkt bazowe za zbiórkę", a.punktacja?.base], ["Przyrost streaka (pkt za kolejną zbiórkę)", a.punktacja?.przyrost ?? (a.punktacja?.base * a.punktacja?.step)], ["Pkt za mundur", a.punktacja?.mundur]], [24, 30]]];
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`);
   zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
   zip.file("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map(([n], i) => `<sheet name="${xe(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`);
@@ -965,7 +965,8 @@ function vUstawienia() {
    <p class="mut">Po pobraniu pliku trzeba zezwolić na instalację z tego źródła.</p></div>
    <div class="card"><h2>Ustawienia punktacji</h2>
    <div class="row">Pkt bazowe za zbiórkę zastępu <input type="number" data-c="base" value="${c.base}"></div>
-   <div class="row">Przyrost streaka <input type="number" step="0.05" data-c="step" value="${c.step}"></div>
+   <div class="row">Przyrost streaka: + <input type="number" step="0.5" inputmode="decimal" data-c="przyrost" value="${streakInc(c)}"> pkt za każdą kolejną zbiórkę</div>
+   <p class="mut" id="sex">${streakExample(c)}</p>
    <div class="row">Pkt za mundur na osobę <input type="number" data-c="mundur" value="${c.mundur}"></div>
    <h3>Gra duża (1.–6. miejsce)</h3>${list("duze")}<h3>Gra mała</h3>${list("male")}
    <h3>Alarm — punkty za osobę w progach</h3>${list("alarmProgi")}<h3>Alarm — bonus za kolejność zastępów</h3>${list("alarmBonus")}
@@ -977,7 +978,10 @@ function vUstawienia() {
    <div class="row" style="margin-top:14px"><button class="pri" id="csave">Zapisz ustawienia</button></div>
    <p class="mut">Zmiana ustawień przelicza wszystkie wyniki od nowa. Streak zeruje się na początku każdego kwartału.</p></div>`;
 }
+const streakExample = c => "Np.: " + [1, 2, 3, 4, 5].map(n => `${n}. zbiórka ${frac(zbiorkaPts(c, n))}`).join(" · ") + " pkt";
 binders.ustawienia = () => {
+  const ex = () => { const b = Number($('[data-c="base"]').value), x = Number($('[data-c="przyrost"]').value); $("#sex").textContent = streakExample({ base: b, przyrost: x }); };
+  $('[data-c="base"]').addEventListener("input", ex); $('[data-c="przyrost"]').addEventListener("input", ex);
   $$("[data-copy]").forEach(b => b.onclick = () => copyText($("#" + b.dataset.copy).value, b));
   $$("[data-share]").forEach(b => b.onclick = () => navigator.share({ title: "Kniejapunkty", text: "Punktacja zastępów", url: $("#" + b.dataset.share).value }).catch(() => {}));
   const c = structuredClone(S.cfg);
@@ -989,7 +993,7 @@ binders.ustawienia = () => {
   };
   $("#kadd").onclick = () => { read(); c.kwartaly.push({ nazwa: "Nowy kwartał", start: today(), end: today() }); S.cfg = c; render(); };
   $$("[data-kdel]").forEach(b => b.onclick = () => { read(); c.kwartaly.splice(+b.dataset.kdel, 1); S.cfg = c; render(); });
-  $("#csave").onclick = () => { read(); setDoc(doc(db, "config", "main"), c).then(() => alert("Zapisano")).catch(err); };
+  $("#csave").onclick = () => { read(); c.step = c.base ? c.przyrost / c.base : 0; setDoc(doc(db, "config", "main"), c).then(() => alert("Zapisano")).catch(err); };
 };
 
 // ---------- UŻYTKOWNICY (tylko administrator)
