@@ -1,1 +1,15 @@
-{"name":"Punktacja zastępów","short_name":"Punktacja","start_url":".","display":"standalone","background_color":"#f4f1ea","theme_color":"#2f5d3a"}
+{
+  "name": "Punktacja zastępów",
+  "short_name": "Kniejapunkty",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#7e9138",
+  "theme_color": "#2f5d3a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
