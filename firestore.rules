@@ -70,6 +70,22 @@ service cloud.firestore {
         && (resource.data.uid == request.auth.uid || resource.data.get('zglosil', '') == request.auth.uid));
     }
 
+    // sprawności: wniosek składa harcerz za siebie albo zastępowy za harcerza ze swojego zastępu; kadra przyznaje
+    match /sprawnosci/{id} {
+      allow read: if true;
+      allow create: if kadra() || (mojZastep()
+        && request.resource.data.status == 'oczekuje'
+        && request.resource.data.zastep == me().zastep
+        && request.resource.data.gwiazdki in [1, 2, 3]
+        && request.resource.data.autor == request.auth.uid
+        && request.resource.data.utworzono == request.time
+        && (((szeregowy() || zastepowy()) && request.resource.data.uid == request.auth.uid)
+          || (zastepowy() && zMojegoZastepu(request.resource.data.uid))));
+      allow update: if kadra();
+      allow delete: if kadra() || (signed() && resource.data.status == 'oczekuje'
+        && (resource.data.uid == request.auth.uid || resource.data.autor == request.auth.uid));
+    }
+
     match /zdjecia/{id} {
       allow read: if kadra() || (signed() && (resource.data.uid == request.auth.uid || resource.data.get('zglosil', '') == request.auth.uid));
       allow create, update: if signed() && id == request.resource.data.alarmId + '_' + request.resource.data.uid

@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-211718";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts } from "./scoring.js?v=20261022-211718";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-215146";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261022-215146";
 
-const BUILD = "20261022-211718";
+const BUILD = "20261022-215146";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -23,7 +23,7 @@ async function checkUpdate() {
 }
 setInterval(checkUpdate, 60000); document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
 setTimeout(checkUpdate, 3000);
-const S = { user: null, profile: null, cfg: DEFAULT_CONFIG, zbiorki: [], akcje: [], alarmy: [], meldunki: [], korekty: [], users: [],
+const S = { user: null, profile: null, cfg: DEFAULT_CONFIG, zbiorki: [], akcje: [], alarmy: [], meldunki: [], korekty: [], sprawnosci: [], users: [],
   tab: "wyniki", q: 0, edit: null, view: null, photo: null, busy: false };
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
@@ -51,14 +51,26 @@ const DAY_MS = 86400000;
 
 // ---------- dane na żywo
 // Podczas edycji formularza nie przerysowujemy strony (żeby nie gubić wpisywanych danych i kliknięć).
-const refresh = () => { autoArchive(); if (!S.edit && !S.busy) render(); };
+const refresh = () => { autoArchive(); if (!S.edit && !S.busy) renderKeep(); };
+// Przerysowanie po zmianie danych z bazy nie kasuje tego, co ktoś właśnie wpisuje w formularzu.
+function renderKeep() {
+  const keep = [], act = document.activeElement, main = $("#main");
+  if (S._rk === rkey()) main?.querySelectorAll("input[id], select[id], textarea[id]").forEach(el => {
+    if (!el.readOnly && !["file", "checkbox", "radio", "button", "password"].includes(el.type)) keep.push([el.id, el.value]); });
+  const foc = act?.id && main?.contains(act) ? { id: act.id, s: act.selectionStart, e: act.selectionEnd } : null;
+  render();
+  for (const [id, v] of keep) { const el = document.getElementById(id);
+    if (!el || el.value === v || (el.tagName === "SELECT" && ![...el.options].some(o => o.value === v))) continue; el.value = v; }
+  if (foc) { const el = document.getElementById(foc.id); if (el && el !== document.activeElement) { el.focus({ preventScroll: true }); try { if (foc.s != null) el.setSelectionRange(foc.s, foc.e); } catch (e) {} } }
+}
+const rkey = () => S.tab + "|" + (S.view?.kind || "") + "|" + (S.view?.id || "");
 S.loaded = {};
 onSnapshot(doc(db, "config", "main"), s => { S.cfg = { ...DEFAULT_CONFIG, ...(s.data() || {}) }; S.loaded.cfg = true; pickQuarter(); refresh(); });
 const live = (name, key, map = x => x) => onSnapshot(collection(db, name), s => {
   S[key] = s.docs.map(d => map({ id: d.id, ...d.data() })).sort((a, b) => (b.data || "").localeCompare(a.data || "")); S.loaded[key] = true; refresh();
-}, e => console.warn(name, e));
+}, e => { console.warn(name, e); S.denied = { ...S.denied, [key]: e.code || "błąd" }; refresh(); });
 live("zbiorkiZastepu", "zbiorki"); live("akcje", "akcje"); live("alarmy", "alarmy");
-live("korekty", "korekty");
+live("korekty", "korekty"); live("sprawnosci", "sprawnosci");
 live("meldunki", "meldunki", m => ({ ...m, czasMs: m.czas?.toMillis ? m.czas.toMillis() : (m.czas == null ? Date.now() : Number(m.czas)) }));
 let usersUnsub = null, profUnsub = null, secretsUnsub = null, archUnsub = null, zUnsub = null;
 onAuthStateChanged(auth, async u => {
@@ -85,7 +97,7 @@ onAuthStateChanged(auth, async u => {
 function pickQuarter() { const t = today(); const i = S.cfg.kwartaly.findIndex(q => t >= q.start && t <= q.end); if (i >= 0 && S._qset !== true) S.q = i; }
 
 // ---------- nawigacja
-const TABS = [["wyniki","🏆 Wyniki"],["zbiorki","🔥 Zbiórki zastępu"],["akcje","⛺ Zbiórki drużyny / biwaki"],["alarmy","🚨 Alarmy"],["ja","👤 Ja"],["ustawienia","⚙️ Ustawienia"],["uzytkownicy","👥 Użytkownicy"]];
+const TABS = [["wyniki","🏆 Wyniki"],["zbiorki","🔥 Zbiórki zastępu"],["akcje","⛺ Zbiórki drużyny / biwaki"],["alarmy","🚨 Alarmy"],["sprawnosci","🎖 Sprawności"],["ja","👤 Ja"],["ustawienia","⚙️ Ustawienia"],["uzytkownicy","👥 Użytkownicy"]];
 const ROLA_TXT = () => ({ admin: "kadra · administrator", kadra: isAdmin() ? "kadra · administrator" : "kadra", zastepowy: "zastępowy · " + (S.profile?.zastep || "bez zastępu"),
   szeregowy: "szeregowy · " + (S.profile?.zastep || "bez zastępu"), brak: "konto nieaktywne" }[rola()] || (S.user && !S.profile ? "konto nieaktywne" : ""));
 function renderChrome() {
@@ -107,8 +119,8 @@ function render() {
   renderChrome(); const ver = $("#ver");
   if (ver) ver.textContent = "wersja " + BUILD + (S.user ? ` · konto ${S.user.uid.slice(0, 6)} · ` + (S.profErr ? `błąd profilu: ${S.profErr}`
     : !S.profile ? "brak profilu" : `rola: ${S.profile.rola}` + (["kadra", "admin"].includes(S.profile.rola) ? ` · admin: ${S.profile.admin === true ? "tak" : S.profile.admin === undefined ? "brak pola" : JSON.stringify(S.profile.admin)}` : "")) : "") + (S.diag ? " · " + S.diag : "");
-  const views = { wyniki: vWyniki, zbiorki: vZbiorki, akcje: vAkcje, alarmy: vAlarmy, ustawienia: vUstawienia, uzytkownicy: vUsers, login: vLogin, ja: vJa };
-  $("#main").innerHTML = (views[S.tab] || vWyniki)();
+  const views = { wyniki: vWyniki, zbiorki: vZbiorki, akcje: vAkcje, alarmy: vAlarmy, sprawnosci: vSprawnosci, ustawienia: vUstawienia, uzytkownicy: vUsers, login: vLogin, ja: vJa };
+  $("#main").innerHTML = (views[S.tab] || vWyniki)(); S._rk = rkey();
   bindQuarter(); (binders[S.tab] || (() => {}))();
 }
 const binders = {};
@@ -153,7 +165,7 @@ function vWyniki() {
   let pos = 0, last = null;
   const items = order.map((z, i) => { if (t[z].suma !== last) { pos = i + 1; last = t[z].suma; }
     return `<div class="it"><div class="pos">${pos}</div><div><b>${z}</b> <span class="fire">${t[z].streak ? "🔥".repeat(Math.min(t[z].streak, 5)) + " " + t[z].streak : ""}</span>
-    <div class="mut">zbiórki ${frac(t[z].zbiorki)} · drużyna ${frac(t[z].akcje)} · alarmy ${frac(t[z].alarmy)}</div></div>
+    <div class="mut">zbiórki ${frac(t[z].zbiorki)} · drużyna ${frac(t[z].akcje)} · alarmy ${frac(t[z].alarmy)} · sprawności ${frac(t[z].sprawnosci)}</div></div>
     <div class="pts">${frac(t[z].suma)}</div></div>`; }).join("");
   const det = ZASTEPY.map(z => `<details><summary><b>${z}</b> — historia streaka</summary><table><tr><th>Tydzień</th><th class="n">n</th><th class="n">Pkt</th><th></th></tr>
     ${t[z].log.map(l => `<tr><td>${plDay(l.tydzien)}</td><td class="n">${l.n}</td><td class="n">${frac(l.pkt)}</td><td class="mut">${l.info || ""}</td></tr>`).join("") || `<tr><td colspan=4 class="mut">brak</td></tr>`}</table></details>`).join("");
@@ -264,7 +276,7 @@ function vAkcje() {
     ${isKadra() ? `<div class="row"><button class="pri" id="anew">+ Nowa zbiórka drużyny / biwak</button><button id="hist">📜 Historia punktów</button></div>` : ""}
     <div class="scroll"><table><tr><th>Data</th><th>Akcja</th>${ZASTEPY.map(z => `<th class="n">${z}</th>`).join("")}<th></th></tr>
     ${rows || `<tr><td colspan=9 class="mut">Brak akcji w tym kwartale</td></tr>`}</table></div>
-    <p class="mut">Punkty = gry × obecni/liczebność + umundurowanie (bez przeliczania).</p></div>`;
+    <p class="mut">Punkty = (gry + umundurowanie) × obecni / liczebność zastępu.</p></div>`;
 }
 binders.akcje = () => {
   if (S.edit?.kind === "akcja") return bindAkcjaEdit();
@@ -277,9 +289,10 @@ binders.akcje = () => {
 function akcjaPreview() {
   const r = akcjaPoints(S.cfg, S.edit.d);
   return `<table>${head()}
-   <tr><td>Gry (surowe)</td>${ZASTEPY.map(z => `<td class="n">${frac(r[z].gry)}</td>`).join("")}</tr>
-   <tr><td>Gry × hob/h</td>${ZASTEPY.map(z => `<td class="n">${frac(r[z].gryPrzel)}</td>`).join("")}</tr>
+   <tr><td>Gry</td>${ZASTEPY.map(z => `<td class="n">${frac(r[z].gry)}</td>`).join("")}</tr>
    <tr><td>Mundur</td>${ZASTEPY.map(z => `<td class="n">${frac(r[z].mund)}</td>`).join("")}</tr>
+   <tr><td>Suma</td>${ZASTEPY.map(z => `<td class="n">${frac(r[z].suma)}</td>`).join("")}</tr>
+   <tr><td>× obecni / liczebność</td>${ZASTEPY.map(z => `<td class="n">${r[z].h > 0 ? `${r[z].hob}/${r[z].h}` : "–"}</td>`).join("")}</tr>
    <tr><td><b>Razem</b></td>${ZASTEPY.map(z => `<td class="n"><b>${frac(r[z].total)}</b></td>`).join("")}</tr></table>`;
 }
 function vAkcjaEdit() {
@@ -291,14 +304,9 @@ function vAkcjaEdit() {
     <div class="scroll"><table>${head()}${numRow("Miejsce (remis = to samo)", z => g.miejsca?.[z], z => `gry.${i}.miejsca.${z}`, "–")}</table></div>`).join("");
   const mund = a.mundury.map((m, i) => `<h3><input data-p="mundury.${i}.nazwa" value="${esc(m.nazwa)}" placeholder="Sprawdzanie munduru ${i + 1}">
     <button class="del" data-rm="mundury.${i}">Usuń</button></h3>
-    <div class="row"><label>Punkty dziel przez: <select data-p="mundury.${i}.dziel" data-dziel="${i}">
-      ${[["obecni", "obecnych na zbiórce"], ["liczebnosc", "liczebność zastępu"], ["wlasne", "własną liczbę"]].map(([v, l]) =>
-        `<option value="${v}" ${(m.dziel || "obecni") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
     <div class="scroll"><table>${head()}
     ${numRow("Obecni przy sprawdzaniu", z => m.dane?.[z]?.h, z => `mundury.${i}.dane.${z}.h`, z => a.wyniki?.[z]?.hob ?? "")}
-    ${numRow("Liczba błędów", z => m.dane?.[z]?.b, z => `mundury.${i}.dane.${z}.b`)}
-    ${numRow("Dzielnik (własny)", z => m.dane?.[z]?.d, z => `mundury.${i}.dane.${z}.d`, "auto")
-      .replace("<tr>", `<tr data-wlasne="${i}" ${(m.dziel || "obecni") === "wlasne" ? "" : "hidden"}>`)}</table></div>`).join("");
+    ${numRow("Liczba błędów", z => m.dane?.[z]?.b, z => `mundury.${i}.dane.${z}.b`)}</table></div>`).join("");
   return `<div class="card"><h2>${S.edit.id ? "Edycja akcji" : "Nowa zbiórka drużyny / biwak"}</h2>
    <div class="row"><select data-p="typ"><option value="zbiorka" ${a.typ === "zbiorka" ? "selected" : ""}>Zbiórka drużyny</option><option value="biwak" ${a.typ === "biwak" ? "selected" : ""}>Biwak</option></select>
    <input type="date" data-p="data" value="${a.data}"><input data-p="nazwa" value="${esc(a.nazwa)}" placeholder="Nazwa"></div>
@@ -307,20 +315,18 @@ function vAkcjaEdit() {
    ${numRow("Obecni (hob)", z => a.wyniki?.[z]?.hob, z => `wyniki.${z}.hob`)}</table></div>
    <p class="mut">Puste h = liczebność z ustawień.</p>
    <h3>Gry</h3>${gry}<div class="row"><button id="gAdd">+ Gra duża</button><button id="mAdd">+ Gra mała</button></div>
-   <h3>Umundurowanie</h3><p class="mut">Punkty = (${S.cfg.mundur} × obecni przy sprawdzaniu − błędy) ÷ wybrany dzielnik. Liczba obecnych przy sprawdzaniu jest domyślnie taka jak obecnych na zbiórce (szara podpowiedź) — wpisz inną, jeśli się różni; wyczyść pole, żeby wrócić do domyślnej. Pusty dzielnik własny („auto”) = obecni przy sprawdzaniu.</p>${mund}<div class="row"><button id="uAdd">+ Sprawdzanie munduru</button></div>
+   <h3>Umundurowanie</h3><p class="mut">Punkty = ${S.cfg.mundur} × obecni przy sprawdzaniu − błędy (bez dzielenia). Dodają się do punktów z gier i razem z nimi są mnożone przez obecni / liczebność. Liczba obecnych przy sprawdzaniu jest domyślnie taka jak obecnych na zbiórce (szara podpowiedź) — wpisz inną, jeśli się różni; wyczyść pole, żeby wrócić do domyślnej.</p>${mund}<div class="row"><button id="uAdd">+ Sprawdzanie munduru</button></div>
    <h3>Podgląd punktów</h3><div class="scroll" id="pv">${akcjaPreview()}</div>
    <div class="row"><button class="pri" id="save">Zapisz</button><button id="cancel">Anuluj</button>${S.edit.id ? `<button class="del" id="remove">Usuń akcję</button>` : ""}</div></div>`;
 }
 function bindAkcjaEdit() {
   bindEditor(akcjaPreview); const a = S.edit.d;
-  $$("[data-dziel]").forEach(el => el.addEventListener("change", () => {
-    const tr = document.querySelector(`[data-wlasne="${el.dataset.dziel}"]`); if (tr) tr.hidden = el.value !== "wlasne"; }));
   // zmiana obecnych na zbiórce od razu zmienia podpowiedź w sprawdzaniu munduru
   ZASTEPY.forEach(z => { const el = document.querySelector(`[data-p="wyniki.${z}.hob"]`);
     el && el.addEventListener("input", () => $$(`[data-p^="mundury."][data-p$=".dane.${z}.h"]`).forEach(x => x.placeholder = el.value)); });
   $("#gAdd").onclick = () => { a.gry.push({ nazwa: "", rodzaj: "duza", miejsca: {} }); render(); };
   $("#mAdd").onclick = () => { a.gry.push({ nazwa: "", rodzaj: "mala", miejsca: {} }); render(); };
-  $("#uAdd").onclick = () => { a.mundury.push({ nazwa: "", dziel: "obecni", dane: {} }); render(); };
+  $("#uAdd").onclick = () => { a.mundury.push({ nazwa: "", dane: {} }); render(); };
   $("#save").onclick = () => { if (!S.edit.d.data) return alert("Wybierz datę"); saveDoc("akcje"); };
   $("#remove") && ($("#remove").onclick = () => confirm("Usunąć akcję?") && deleteDoc(doc(db, "akcje", S.edit.id)).then(() => doneEdit()).catch(err));
 }
@@ -596,8 +602,132 @@ function bindAlarmEdit() {
   $("#remove") && ($("#remove").onclick = () => confirm("Usunąć alarm? Meldunki do niego przestaną się liczyć.") && deleteDoc(doc(db, "alarmy", S.edit.id)).then(() => doneEdit()).catch(err));
 }
 
+// ---------- SPRAWNOŚCI: wniosek (harcerz albo jego zastępowy) → kadra przyznaje → punkty dla zastępu
+const SSTAT = { oczekuje: ["w", "⏳ czeka"], przyznana: ["ok", "✅ przyznana"], odrzucona: ["no", "❌ odrzucona"] };
+const gw = n => "★".repeat(Math.max(0, Math.min(3, Number(n) || 0)));
+const sprPk = n => frac(sprawPts(S.cfg, { gwiazdki: n }));
+function vSprawnosci() {
+  if (S.edit?.kind === "sprawnosc") return vSprawEdit();
+  if (S.view?.kind === "hist") return vHist("sprawnosci");
+  const r = rola(), mine = S.profile?.zastep, cq = currentQ(), me = S.user?.uid;
+  const denied = S.denied?.sprawnosci ? `<div class="card"><p class="err">Brak dostępu do sprawności w bazie — kadra musi wkleić nowe reguły w Firebase (Firestore → Rules).</p></div>` : "";
+  // --- formularz wniosku / przyznania
+  let form = "";
+  if (S.user && (isKadra() || canMeldowac())) {
+    const title = isKadra() ? "🎖 Przyznaj sprawność" : "🎖 Wniosek o sprawność";
+    if (!cq) form = `<div class="card"><h2>${title}</h2><p class="err">Dzisiejsza data nie należy do żadnego kwartału. Kadra musi dodać bieżący kwartał w Ustawieniach.</p></div>`;
+    else if (!isKadra() && !ZASTEPY.includes(mine)) form = `<div class="card"><h2>${title}</h2><p class="err">Nie masz przypisanego zastępu — poproś kadrę.</p></div>`;
+    else {
+      const byName = (x, y) => (x.imie || "").localeCompare(y.imie || "", "pl");
+      let whoSel = "";
+      if (isKadra()) {
+        const c = S.users.filter(u => ["szeregowy", "zastepowy"].includes(u.rola) && ZASTEPY.includes(u.zastep));
+        whoSel = `<select id="sp_u"><option value="">– wybierz harcerza –</option>${ZASTEPY.map(z => { const g = c.filter(u => u.zastep === z).sort(byName);
+          return g.length ? `<optgroup label="${z}">${g.map(u => `<option value="${u.id}">${esc(u.imie || loginOfUser(u))}</option>`).join("")}</optgroup>` : ""; }).join("")}</select>`;
+      } else if (r === "zastepowy") {
+        const c = (S.zUsers || []).filter(u => u.id !== me && u.zastep === mine).sort(byName);
+        whoSel = `<select id="sp_u"><option value="${me}">Ja (${esc(myName())})</option>${c.map(u => `<option value="${u.id}">${esc(u.imie || loginOfUser(u))}</option>`).join("")}</select>`;
+      }
+      const names = [...new Set(S.sprawnosci.map(x => x.nazwa).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pl"));
+      const g = S.spG || 1;
+      form = `<div class="card"><h2>${title}</h2>
+        ${whoSel ? `<div class="row"><label>Dla kogo<br>${whoSel}</label></div>` : ""}
+        <div class="row"><label style="flex:1">Nazwa sprawności<br><input id="sp_n" list="sp_names" placeholder="np. Kucharz" autocomplete="off" style="width:100%"></label></div>
+        <datalist id="sp_names">${names.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+        <div class="row"><span class="mut">Gwiazdki:</span>${[1, 2, 3].map(n => `<button data-g="${n}" class="${g === n ? "on" : ""}"><span class="gw">${gw(n)}</span> <span class="mut">${sprPk(n)} pkt</span></button>`).join("")}</div>
+        <div class="row"><button class="pri" id="sp_add">${isKadra() ? "✔ Przyznaj sprawność" : "📨 Wyślij wniosek"}</button></div>
+        <p class="mut">${isKadra() ? "Sprawność dodana przez kadrę jest od razu przyznana." : "Punkty dla zastępu naliczają się po zatwierdzeniu przez kadrę."}
+        Liczy się do kwartału, w którym złożono wniosek (teraz: <b>${esc(cq.nazwa)}</b>).${r === "zastepowy" ? " Jako zastępowy możesz złożyć wniosek także za harcerza ze swojego zastępu." : ""}</p></div>`;
+    }
+  }
+  // --- listy
+  const status = s => `<span class="badge ${SSTAT[s.status]?.[0] || ""}">${SSTAT[s.status]?.[1] || esc(s.status)}</span>`;
+  const row = (s, o) => `<tr><td><b>${esc(s.nazwa)}</b> <span class="gw">${gw(s.gwiazdki)}</span><div class="mut">${frac(sprawPts(S.cfg, s))} pkt</div></td>
+    <td>${esc(s.imie)}${s.autor && s.autor !== s.uid && s.autor !== s.sprawdzil ? `<div class="mut">zgłosił(a) ${esc(s.autorImie || "")}</div>` : ""}</td><td>${esc(s.zastep)}</td>
+    <td>${plDay(s.data)}</td>${o.st ? `<td>${status(s)}</td>` : ""}${o.who ? `<td>${ktoKiedy(s.sprawdzilImie, s.sprawdzil, s.sprawdzono)}</td>` : ""}
+    <td class="act">${isKadra() && s.status !== "przyznana" ? `<button data-sok="${s.id}">✔ Przyznaj</button>` : ""}${isKadra() && s.status === "oczekuje" ? `<button data-sno="${s.id}" title="Odrzuć">✖</button>` : ""}${isKadra() ? `<button data-sed="${s.id}" title="Edytuj" aria-label="Edytuj">✎</button>` : ""}${!isKadra() && me && s.status === "oczekuje" && (s.uid === me || s.autor === me) ? `<button class="del" data-sdel="${s.id}">Wycofaj</button>` : ""}</td></tr>`;
+  const table = (list, empty, o = {}) => `<div class="scroll"><table><tr><th>Sprawność</th><th>Kto</th><th>Zastęp</th><th>Wniosek</th>${o.st ? "<th>Status</th>" : ""}${o.who ? `<th>${o.who}</th>` : ""}<th></th></tr>
+    ${list.map(s => row(s, o)).join("") || `<tr><td colspan=7 class="mut">${empty}</td></tr>`}</table></div>`;
+  const accQ = S.sprawnosci.filter(s => s.status === "przyznana" && inQ(s.data));
+  const pts = z => accQ.filter(s => s.zastep === z).reduce((a, s) => a + sprawPts(S.cfg, s), 0);
+  const summary = `<div class="scroll"><table>${head()}<tr><td>Przyznane</td>${ZASTEPY.map(z => `<td class="n">${accQ.filter(s => s.zastep === z).length}</td>`).join("")}</tr>
+    <tr><td><b>Punkty</b></td>${ZASTEPY.map(z => `<td class="n"><b>${frac(pts(z))}</b></td>`).join("")}</tr></table></div>`;
+  const pktTxt = `<p class="mut">Za przyznaną sprawność zastęp dostaje: ${[1, 2, 3].map(n => `<span class="gw">${gw(n)}</span> ${sprPk(n)} pkt`).join(" · ")}.</p>`;
+  // szeregowy: własne wnioski + przyznane w swoim zastępie
+  if (r === "szeregowy") {
+    if (!ZASTEPY.includes(mine)) return denied + form;
+    const own = S.sprawnosci.filter(s => s.uid === me && (s.status === "oczekuje" || inQ(s.data)));
+    const accMine = accQ.filter(s => s.zastep === mine);
+    return denied + form + `<div class="card"><h2>📋 Moje sprawności <span class="badge">${own.length}</span></h2>${quarterPicker()}${table(own, "Brak wniosków w tym kwartale", { st: 1 })}</div>
+      <div class="card"><h2>✅ Przyznane w zastępie ${esc(mine)} <span class="badge ok">${accMine.length}</span></h2>${table(accMine, "Brak przyznanych sprawności w tym kwartale", { who: "Przyznał" })}${pktTxt}</div>`;
+  }
+  const pend = S.sprawnosci.filter(s => s.status === "oczekuje" && (isKadra() || s.zastep === mine));
+  const rej = S.sprawnosci.filter(s => s.status === "odrzucona" && inQ(s.data) && (isKadra() || (r === "zastepowy" && s.zastep === mine)));
+  return denied + (isKadra() ? `<div class="card">${histBtn()}</div>` : "") + form
+    + (isKadra() || r === "zastepowy" ? `<div class="card"><h2>⏳ Czekają na zatwierdzenie <span class="badge w">${pend.length}</span></h2>${table(pend, "Brak wniosków")}</div>` : "")
+    + `<div class="card"><h2>✅ Przyznane <span class="badge ok">${accQ.length}</span></h2>${quarterPicker()}${summary}${table(accQ, "Brak przyznanych sprawności w tym kwartale", { who: "Przyznał" })}
+      ${rej.length ? `<details><summary class="mut">Odrzucone w tym kwartale (${rej.length})</summary>${table(rej, "", { who: "Odrzucił" })}</details>` : ""}${pktTxt}</div>`;
+}
+binders.sprawnosci = () => {
+  if (S.edit?.kind === "sprawnosc") return bindSprawEdit();
+  if (S.view?.kind === "hist") return bindHist("sprawnosci");
+  bindHistBtn();
+  $$("[data-g]").forEach(b => b.onclick = () => { S.spG = +b.dataset.g; $$("[data-g]").forEach(x => x.classList.toggle("on", x === b)); });
+  $("#sp_add") && ($("#sp_add").onclick = () => addSpraw($("#sp_add")));
+  const set = (id, status) => updateDoc(doc(db, "sprawnosci", id), { status, sprawdzil: S.user.uid, sprawdzilImie: myName(), sprawdzono: serverTimestamp() }).catch(err);
+  $$("[data-sok]").forEach(b => b.onclick = () => set(b.dataset.sok, "przyznana"));
+  $$("[data-sno]").forEach(b => b.onclick = () => set(b.dataset.sno, "odrzucona"));
+  $$("[data-sed]").forEach(b => b.onclick = () => { S.edit = { kind: "sprawnosc", id: b.dataset.sed, d: { ...S.sprawnosci.find(x => x.id === b.dataset.sed) } }; render(); });
+  $$("[data-sdel]").forEach(b => b.onclick = () => confirm("Wycofać wniosek o sprawność?") && deleteDoc(doc(db, "sprawnosci", b.dataset.sdel)).catch(err));
+};
+async function addSpraw(btn) {
+  const nazwa = $("#sp_n").value.trim().replace(/\s+/g, " "), g = S.spG || 1, sel = $("#sp_u")?.value, kadra = isKadra();
+  if (nazwa.length < 2) return alert("Wpisz nazwę sprawności");
+  if (!currentQ()) return alert("Dzisiejsza data nie należy do żadnego kwartału.");
+  let who;
+  if (kadra) { const u = S.users.find(x => x.id === sel); if (!u) return alert("Wybierz harcerza"); who = { uid: u.id, imie: u.imie || loginOfUser(u), zastep: u.zastep }; }
+  else if (rola() === "zastepowy" && sel && sel !== S.user.uid) { const u = (S.zUsers || []).find(x => x.id === sel); if (!u) return alert("Wybierz harcerza");
+    who = { uid: u.id, imie: u.imie || loginOfUser(u), zastep: S.profile.zastep }; }
+  else who = { uid: S.user.uid, imie: myName(), zastep: S.profile.zastep };
+  if (!ZASTEPY.includes(who.zastep)) return alert("Ta osoba nie ma przypisanego zastępu");
+  const dup = S.sprawnosci.find(s => s.uid === who.uid && s.status !== "odrzucona" && Number(s.gwiazdki) === g && (s.nazwa || "").toLowerCase() === nazwa.toLowerCase());
+  if (dup && !confirm(`${who.imie} ma już ${dup.status === "przyznana" ? "przyznaną" : "zgłoszoną"} sprawność „${dup.nazwa}” ${gw(g)}. Dodać mimo to?`)) return;
+  const d = { uid: who.uid, imie: who.imie, zastep: who.zastep, nazwa, gwiazdki: g, data: today(), status: kadra ? "przyznana" : "oczekuje",
+    autor: S.user.uid, autorImie: myName(), utworzono: serverTimestamp(),
+    ...(kadra ? { sprawdzil: S.user.uid, sprawdzilImie: myName(), sprawdzono: serverTimestamp() } : {}) };
+  btn.disabled = true;
+  try { await addDoc(collection(db, "sprawnosci"), d); const o = $("#sp_n"); if (o) o.value = ""; }
+  catch (e) { err(e.code === "permission-denied" ? "Brak uprawnień do zapisania sprawności (kadra musi wkleić nowe reguły w Firebase)." : e); }
+  const b2 = $("#sp_add"); if (b2) b2.disabled = false;
+}
+// --- edycja sprawności (kadra)
+function vSprawEdit() {
+  if (!isKadra()) { S.edit = null; return vSprawnosci(); }
+  const s = S.edit.d;
+  return `<div class="card"><h2>Edycja sprawności</h2>
+   <p><b>${esc(s.imie)}</b> <span class="mut">· ${esc(s.zastep)} · wniosek ${plTs(s.utworzono)}${s.autorImie ? " · złożył(a) " + esc(s.autorImie) : ""}</span></p>
+   <div class="row"><label style="flex:1">Nazwa sprawności<br><input id="se_n" value="${esc(s.nazwa)}" style="width:100%"></label></div>
+   <div class="row"><label>Gwiazdki<br><select id="se_g">${[1, 2, 3].map(n => `<option value="${n}" ${Number(s.gwiazdki) === n ? "selected" : ""}>${gw(n)} (${sprPk(n)} pkt)</option>`).join("")}</select></label>
+   <label>Data wniosku<br><input type="date" id="se_d" value="${s.data || ""}"></label>
+   <label>Status<br><select id="se_s">${["przyznana", "oczekuje", "odrzucona"].map(v => `<option value="${v}" ${s.status === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
+   <p class="mut">Data wniosku decyduje, do którego kwartału liczą się punkty.</p>
+   <div class="row"><button class="pri" id="sesave">Zapisz</button><button id="secancel">Anuluj</button><button class="del" id="sedel">Usuń</button></div></div>`;
+}
+function bindSprawEdit() {
+  $("#secancel").onclick = () => doneEdit();
+  $("#sedel").onclick = () => confirm("Usunąć tę sprawność?") && deleteDoc(doc(db, "sprawnosci", S.edit.id)).then(() => doneEdit()).catch(err);
+  $("#sesave").onclick = async () => {
+    const s = S.edit.d, nazwa = $("#se_n").value.trim().replace(/\s+/g, " "), status = $("#se_s").value, data = $("#se_d").value;
+    if (nazwa.length < 2) return alert("Wpisz nazwę sprawności");
+    if (!data) return alert("Wybierz datę");
+    const upd = { nazwa, gwiazdki: Number($("#se_g").value), data, status, zmienil: S.user.uid, zmienilImie: myName() };
+    if (status !== s.status && status !== "oczekuje") Object.assign(upd, { sprawdzil: S.user.uid, sprawdzilImie: myName(), sprawdzono: serverTimestamp() });
+    try { await updateDoc(doc(db, "sprawnosci", S.edit.id), upd); doneEdit(); } catch (e) { err(e); }
+  };
+}
+
 // ---------- HISTORIA PUNKTÓW (kadra) + ręczne korekty
-const KAT = { zbiorki: "Zbiórki zastępu", akcje: "Zbiórki drużyny / biwaki", alarmy: "Alarmy" };
+const KAT = { zbiorki: "Zbiórki zastępu", akcje: "Zbiórki drużyny / biwaki", alarmy: "Alarmy", sprawnosci: "Sprawności" };
 const sgn = x => (x > 0 ? "+" : "") + frac(x);
 const histBtn = () => isKadra() ? `<div class="row"><button id="hist">📜 Historia punktów</button></div>` : "";
 const bindHistBtn = () => { const b = $("#hist"); if (b) b.onclick = () => { S.view = { kind: "hist" }; render(); }; };
@@ -618,11 +748,14 @@ function histEntries(kat, q = quarter()) {
   if (!kat || kat === "akcje") S.akcje.filter(a => inQ(a.data)).forEach(a => { const r = akcjaPoints(S.cfg, a);
     ZASTEPY.forEach(z => { if (!r[z].total && !r[z].hob) return;
       out.push({ kat: "akcje", data: a.data, zastep: z, pkt: r[z].total, opis: (a.typ === "biwak" ? "Biwak" : "Zbiórka drużyny") + (a.nazwa ? ": " + a.nazwa : ""),
-        info: `gry ${frac(r[z].gryPrzel)} + mundur ${frac(r[z].mund)} · obecni ${r[z].hob}/${r[z].h}`, ref: ["akcja", a.id] }); }); });
+        info: `(gry ${frac(r[z].gry)} + mundur ${frac(r[z].mund)}) × obecni ${r[z].hob}/${r[z].h}`, ref: ["akcja", a.id] }); }); });
   if (!kat || kat === "alarmy") S.alarmy.filter(a => inQ(a.data)).forEach(a => { const r = alarmPoints(S.cfg, a, S.meldunki);
     ZASTEPY.forEach(z => { if (!r[z].total) return;
       out.push({ kat: "alarmy", data: a.data, zastep: z, pkt: r[z].total, opis: "Alarm" + (a.nazwa ? ": " + a.nazwa : ""),
         info: `${frac(r[z].osoby)} za osoby` + (r[z].miejsce ? ` + ${r[z].bonus} bonus (${r[z].miejsce}. miejsce)` : ""), ref: ["alarm", a.id] }); }); });
+  if (!kat || kat === "sprawnosci") S.sprawnosci.filter(s => s.status === "przyznana" && inQ(s.data) && ZASTEPY.includes(s.zastep)).forEach(s =>
+    out.push({ kat: "sprawnosci", data: s.data, zastep: s.zastep, pkt: sprawPts(S.cfg, s), opis: `Sprawność: ${s.nazwa} ${gw(s.gwiazdki)}`,
+      info: (s.imie || "") + (s.sprawdzilImie ? ` · przyznał(a) ${s.sprawdzilImie}` : ""), ref: ["sprawnosc", s.id] }));
   S.korekty.filter(k => (!kat || k.kategoria === kat) && inQ(k.data)).forEach(k => out.push({ kat: k.kategoria, data: k.data, zastep: k.zastep,
     pkt: Number(k.pkt) || 0, opis: "✏️ Korekta: " + (k.powod || "—"), info: `dodał(a) ${k.autorImie || "kadra"}` + (k.zmienilImie ? ` · zmienił(a) ${k.zmienilImie}` : ""),
     ref: ["korekta", k.id], kor: true }));
@@ -664,6 +797,7 @@ function openRef(type, id) {
   else if (type === "akcja") { S.back = back; S.tab = "akcje"; S.view = null; S.edit = { kind: "akcja", id, d: structuredClone(S.akcje.find(x => x.id === id)) }; }
   else if (type === "alarm") { const a = S.alarmy.find(x => x.id === id), d = structuredClone(a); d.progiMin = alarmProgiMin(S.cfg, a);
     S.back = back; S.tab = "alarmy"; S.view = null; S.edit = { kind: "alarm", id, d }; }
+  else if (type === "sprawnosc") { S.back = back; S.tab = "sprawnosci"; S.view = null; S.edit = { kind: "sprawnosc", id, d: { ...S.sprawnosci.find(x => x.id === id) } }; }
   render();
 }
 // --- korekta punktów
@@ -749,6 +883,7 @@ function vJa() {
       ${tile("Streak", n ? "🔥 " + n : "0", n ? `${n} ${plural(n, "tydzień", "tygodnie", "tygodni")} z rzędu` : "")}
       ${tile("Następna zbiórka", "+" + frac(next) + " pkt", doneThisWeek ? "w przyszłym tygodniu" : "w tym tygodniu" + (pendThisWeek ? " (zgłoszona, czeka na zatwierdzenie)" : ""))}
       ${tile("Wykonane alarmy", alDone, `${meldOk} ${plural(meldOk, "zaakceptowany meldunek", "zaakceptowane meldunki", "zaakceptowanych meldunków")}`)}
+      ${tile("Sprawności", S.sprawnosci.filter(s => s.zastep === z && s.status === "przyznana" && inQq(s.data)).length, `przyznane · ${frac(t[z].sprawnosci)} pkt`)}
     </div>`;
   }
   // --- sekcja: dane użytkownika
@@ -767,8 +902,10 @@ function vJa() {
   const my = S.meldunki.filter(m => m.uid === uid && S.alarmy.some(a => a.id === m.alarmId && inQq(a.data)));
   const cnt = st => my.filter(m => m.status === st).length;
   const myZb = S.zbiorki.filter(x => x.autor === uid && inQq(x.data));
+  const mySp = S.sprawnosci.filter(s => s.uid === uid && (s.status === "oczekuje" || inQq(s.data)));
   const inne = `<div class="tiles">
       ${canMeldowac() || my.length ? tile("Twoje alarmy", cnt("zaakceptowany"), `zaakceptowane · ${cnt("oczekuje")} czeka · ${cnt("odrzucony")} odrzucone`) : ""}
+      ${canMeldowac() || mySp.length ? tile("Twoje sprawności", mySp.filter(s => s.status === "przyznana").length, `przyznane w kwartale · ${mySp.filter(s => s.status === "oczekuje").length} czeka`) : ""}
       ${rola() === "zastepowy" || myZb.length ? tile("Zgłoszone przez Ciebie zbiórki", myZb.filter(x => x.status === "zatwierdzona").length, `zatwierdzone · ${myZb.filter(x => x.status === "oczekuje").length} czeka`) : ""}
     </div>
     ${!inApp() && /Android/i.test(navigator.userAgent) ? `<div class="row"><a class="btn pri" href="https://github.com/panbadek/Knieja-punkty/releases/latest/download/Kniejapunkty.apk">📱 Pobierz aplikację na Androida (APK)</a></div>
@@ -837,7 +974,7 @@ function vChart() {
     ${weeks.map(d => { const i = days.indexOf(d); return `<tr><td>${plDay(d)}</td>${series.map(s => `<td class="n">${frac(s.vals[i])}</td>`).join("")}</tr>`; }).join("")}</table></div></details>`;
   return `<div class="card viz"><div class="row"><button id="back">← Ranking</button></div><h2>📈 Punkty zastępów w kwartale</h2>${quarterPicker()}
     <div class="legend">${legend}</div><div id="chwrap" style="position:relative"><div id="chsvgbox"></div><div id="chtip" class="tip" hidden></div></div>
-    <p class="mut">Punkty narastająco — linia wznosi się w dniu, w którym zastęp zdobył punkty (zbiórka, akcja, alarm, korekta). Dotknij wykresu, żeby zobaczyć stan w danym dniu.</p>
+    <p class="mut">Punkty narastająco — linia wznosi się w dniu, w którym zastęp zdobył punkty (zbiórka, akcja, alarm, sprawność, korekta). Dotknij wykresu, żeby zobaczyć stan w danym dniu.</p>
     ${table}<p class="mut">Prowadzi: <b>${last[0]?.z || "–"}</b> (${frac(last[0]?.v || 0)} pkt)</p></div>`;
 }
 function bindChart() {
@@ -868,7 +1005,7 @@ const qKey = q => `${q.start}_${q.end}`;
 const archAttempted = new Set();
 function autoArchive() {
   if (!isKadra() || S.busy) return;
-  const need = ["cfg", "zbiorki", "akcje", "alarmy", "meldunki", "korekty", "archiwum"];
+  const need = ["cfg", "zbiorki", "akcje", "alarmy", "meldunki", "korekty", "sprawnosci", "archiwum"];
   if (!need.every(k => S.loaded[k])) return;                 // dopiero gdy wszystkie dane są wczytane
   for (const q of S.cfg.kwartaly) {
     const k = qKey(q);
@@ -878,9 +1015,9 @@ function autoArchive() {
 function archiveData(q) {
   const t = quarterTotals(S.cfg, q, S, today()), order = [...ZASTEPY].sort((a, b) => t[b].suma - t[a].suma);
   const ranking = order.map(z => ({ zastep: z, miejsce: 1 + order.filter(x => t[x].suma > t[z].suma).length,
-    zbiorki: t[z].zbiorki, akcje: t[z].akcje, alarmy: t[z].alarmy, suma: t[z].suma, streak: t[z].streak }));
+    zbiorki: t[z].zbiorki, akcje: t[z].akcje, alarmy: t[z].alarmy, sprawnosci: t[z].sprawnosci, suma: t[z].suma, streak: t[z].streak }));
   const historia = histEntries(null, q).map(e => ({ data: e.data, kat: e.kat, zastep: e.zastep, pkt: e.pkt, opis: e.opis, info: e.info }));
-  const c = S.cfg, punktacja = { base: c.base, przyrost: streakInc(c), mundur: c.mundur, duze: c.duze, male: c.male, alarmProgi: c.alarmProgi, alarmBonus: c.alarmBonus };
+  const c = S.cfg, punktacja = { base: c.base, przyrost: streakInc(c), mundur: c.mundur, duze: c.duze, male: c.male, alarmProgi: c.alarmProgi, alarmBonus: c.alarmBonus, sprawPkt: c.sprawPkt };
   return { nazwa: q.nazwa, start: q.start, end: q.end, ranking, historia, punktacja, koncowy: q.end < today() };
 }
 async function saveArchive(q, auto) {
@@ -894,8 +1031,8 @@ function vArch() {
   const extra = S.archiwum.filter(a => !S.cfg.kwartaly.some(q => qKey(q) === a.id));
   const card = a => `<div class="card"><h3 style="margin-top:0">${esc(a.nazwa)} <span class="mut">${plDay(a.start)} – ${plDay(a.end)}</span></h3>
     <p class="mut">${a.koncowy ? "Wyniki końcowe" : "⚠ Stan na dzień zapisu (kwartał jeszcze trwał)"} · zapisano ${plTs(a.zapisano)} · ${esc(a.zapisalImie || "")}</p>
-    <div class="scroll"><table><tr><th>#</th><th>Zastęp</th><th class="n">Razem</th><th class="n">Zbiórki</th><th class="n">Drużyna</th><th class="n">Alarmy</th></tr>
-    ${(a.ranking || []).map(r => `<tr><td>${r.miejsce}.</td><td><b>${esc(r.zastep)}</b></td><td class="n"><b>${frac(r.suma)}</b></td><td class="n">${frac(r.zbiorki)}</td><td class="n">${frac(r.akcje)}</td><td class="n">${frac(r.alarmy)}</td></tr>`).join("")}</table></div>
+    <div class="scroll"><table><tr><th>#</th><th>Zastęp</th><th class="n">Razem</th><th class="n">Zbiórki</th><th class="n">Drużyna</th><th class="n">Alarmy</th><th class="n">Sprawności</th></tr>
+    ${(a.ranking || []).map(r => `<tr><td>${r.miejsce}.</td><td><b>${esc(r.zastep)}</b></td><td class="n"><b>${frac(r.suma)}</b></td><td class="n">${frac(r.zbiorki)}</td><td class="n">${frac(r.akcje)}</td><td class="n">${frac(r.alarmy)}</td><td class="n">${r.sprawnosci == null ? "–" : frac(r.sprawnosci)}</td></tr>`).join("")}</table></div>
     <details><summary class="mut">Historia punktów (${(a.historia || []).length} wpisów)</summary><div class="hlist">${(a.historia || []).map(e => `<div class="hl"><div class="hl-top"><span>${plDay(e.data)} · <b>${esc(e.zastep)}</b> · <span class="mut">${KAT[e.kat] || ""}</span></span><span class="hl-pts ${e.pkt < 0 ? "neg" : ""}">${sgn(e.pkt)}</span></div><div>${esc(e.opis)}</div><div class="mut">${esc(e.info)}</div></div>`).join("")}</div></details>
     <div class="row"><button class="pri" data-xlsx="${a.id}">⬇ Excel</button><button data-print="${a.id}">🖨 Drukuj / PDF</button>
     <button data-resave="${a.id}">🔄 Zapisz ponownie</button>${isAdmin() ? `<button class="del" data-adel="${a.id}">Usuń</button>` : ""}</div></div>`;
@@ -933,12 +1070,12 @@ function sheetXml(rows, widths) {
 async function archXlsx(a) {
   const JSZip = await loadJSZip(), zip = new JSZip();
   const sheets = [
-    ["Ranking", [["Miejsce", "Zastęp", "Zbiórki zastępu", "Zbiórki drużyny / biwaki", "Alarmy", "Razem", "Streak (tyg.)"],
-      ...(a.ranking || []).map(r => [r.miejsce, r.zastep, r.zbiorki, r.akcje, r.alarmy, r.suma, r.streak])], [9, 16, 16, 24, 10, 10, 12]],
+    ["Ranking", [["Miejsce", "Zastęp", "Zbiórki zastępu", "Zbiórki drużyny / biwaki", "Alarmy", "Sprawności", "Razem", "Streak (tyg.)"],
+      ...(a.ranking || []).map(r => [r.miejsce, r.zastep, r.zbiorki, r.akcje, r.alarmy, r.sprawnosci ?? 0, r.suma, r.streak])], [9, 16, 16, 24, 10, 12, 10, 12]],
     ["Historia", [["Data", "Kategoria", "Zastęp", "Punkty", "Za co", "Szczegóły"],
       ...(a.historia || []).slice().sort((x, y) => x.data.localeCompare(y.data)).map(e => [plDay(e.data), KAT[e.kat] || e.kat, e.zastep, e.pkt, e.opis, e.info])], [12, 24, 14, 9, 40, 50]],
     ["Informacje", [["Pole", "Wartość"], ["Kwartał", a.nazwa], ["Od", plDay(a.start)], ["Do", plDay(a.end)], ["Status", a.koncowy ? "wyniki końcowe" : "stan na dzień zapisu"],
-      ["Zapisano", plTs(a.zapisano)], ["Zapisał(a)", a.zapisalImie || ""], ["Pkt bazowe za zbiórkę", a.punktacja?.base], ["Przyrost streaka (pkt za kolejną zbiórkę)", a.punktacja?.przyrost ?? (a.punktacja?.base * a.punktacja?.step)], ["Pkt za mundur", a.punktacja?.mundur]], [24, 30]]];
+      ["Zapisano", plTs(a.zapisano)], ["Zapisał(a)", a.zapisalImie || ""], ["Pkt bazowe za zbiórkę", a.punktacja?.base], ["Przyrost streaka (pkt za kolejną zbiórkę)", a.punktacja?.przyrost ?? (a.punktacja?.base * a.punktacja?.step)], ["Pkt za mundur", a.punktacja?.mundur], ["Pkt za sprawność 1★ / 2★ / 3★", (a.punktacja?.sprawPkt || []).join(" / ")]], [24, 30]]];
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`);
   zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
   zip.file("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map(([n], i) => `<sheet name="${xe(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`);
@@ -960,8 +1097,8 @@ function archHtml(a) {
     table{border-collapse:collapse;width:100%;margin-bottom:22px}th,td{border:1px solid #ccc;padding:5px 7px;text-align:left}th{background:#eef2ea}td.n{text-align:right}
     h2{font-size:16px;margin:18px 0 6px}</style></head><body>
     <h1>Punktacja zastępów — ${xe(a.nazwa)}</h1><p>${plDay(a.start)} – ${plDay(a.end)} · ${a.koncowy ? "wyniki końcowe" : "stan na dzień zapisu"} · zapisano ${xe(plTs(a.zapisano))}</p>
-    <h2>Ranking</h2><table><tr><th>Miejsce</th><th>Zastęp</th><th>Zbiórki zastępu</th><th>Zbiórki drużyny / biwaki</th><th>Alarmy</th><th>Razem</th></tr>
-    ${(a.ranking || []).map(r => `<tr><td>${r.miejsce}.</td><td><b>${xe(r.zastep)}</b></td><td class="n">${frac(r.zbiorki)}</td><td class="n">${frac(r.akcje)}</td><td class="n">${frac(r.alarmy)}</td><td class="n"><b>${frac(r.suma)}</b></td></tr>`).join("")}</table>
+    <h2>Ranking</h2><table><tr><th>Miejsce</th><th>Zastęp</th><th>Zbiórki zastępu</th><th>Zbiórki drużyny / biwaki</th><th>Alarmy</th><th>Sprawności</th><th>Razem</th></tr>
+    ${(a.ranking || []).map(r => `<tr><td>${r.miejsce}.</td><td><b>${xe(r.zastep)}</b></td><td class="n">${frac(r.zbiorki)}</td><td class="n">${frac(r.akcje)}</td><td class="n">${frac(r.alarmy)}</td><td class="n">${frac(r.sprawnosci ?? 0)}</td><td class="n"><b>${frac(r.suma)}</b></td></tr>`).join("")}</table>
     <h2>Historia punktów</h2><table><tr><th>Data</th><th>Zastęp</th><th>Kategoria</th><th>Za co</th><th>Pkt</th></tr>
     ${(a.historia || []).slice().sort((x, y) => x.data.localeCompare(y.data)).map(e => `<tr><td>${plDay(e.data)}</td><td>${xe(e.zastep)}</td><td>${xe(KAT[e.kat] || "")}</td><td>${xe(e.opis)}<br><small>${xe(e.info)}</small></td><td class="n">${xe(sgn(e.pkt))}</td></tr>`).join("")}</table>
     </body></html>`);
@@ -992,6 +1129,7 @@ function vUstawienia() {
    <div class="row">Przyrost streaka: + <input type="number" step="0.5" inputmode="decimal" data-c="przyrost" value="${streakInc(c)}"> pkt za każdą kolejną zbiórkę</div>
    <p class="mut" id="sex">${streakExample(c)}</p>
    <div class="row">Pkt za mundur na osobę <input type="number" data-c="mundur" value="${c.mundur}"></div>
+   <h3>Sprawność — punkty za 1★, 2★, 3★</h3>${list("sprawPkt")}
    <h3>Gra duża (1.–6. miejsce)</h3>${list("duze")}<h3>Gra mała</h3>${list("male")}
    <h3>Alarm — punkty za osobę w progach</h3>${list("alarmProgi")}<h3>Alarm — bonus za kolejność zastępów</h3>${list("alarmBonus")}
    <h3>Alarm — domyślne progi czasowe (min)</h3>${list("alarmProgiMin")}

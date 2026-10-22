@@ -4,6 +4,7 @@ export const DEFAULT_CONFIG = {
   base: 20, step: 0.2, przyrost: 4, mundur: 4,
   duze: [40,30,25,20,15,10], male: [20,15,13,11,9,6],
   alarmProgi: [10,6,4,2], alarmBonus: [8,6,5,4,3,1], alarmProgiMin: [20,40,60],
+  sprawPkt: [5,10,20],           // sprawność: 1★, 2★, 3★
   liczebnosc: { Lisy:9, "Łosie":9, "Żubry":9, Rysie:9, "Niedźwiedzie":9, Gronostaje:9 },
   kwartaly: [
     { nazwa: "IV kw. 2026", start: "2026-10-01", end: "2026-12-31" },
@@ -62,18 +63,17 @@ export function akcjaPoints(cfg, a) {
       const m = Number(g.miejsca?.[z]);
       if (m >= 1) gry += Number((g.rodzaj === "duza" ? cfg.duze : cfg.male)[m-1] || 0);
     }
+    // umundurowanie: x × obecni przy sprawdzaniu − błędy (bez dzielenia), jak punkty z gry
     let mund = 0;
     for (const m of a.mundury || []) {
       // obecni przy sprawdzaniu: domyślnie = obecni na zbiórce (hob), chyba że wpisano inaczej
       const d = m.dane?.[z] || {}; const hm = empty(d.h) ? hob : Number(d.h);
       if (!(hm > 0)) continue;
-      // dzielnik wybrany przez wypełniającego: liczebność zastępu / obecni na zbiórce / własna liczba
-      const tryb = m.dziel || "obecni";
-      let div = tryb === "liczebnosc" ? h : tryb === "wlasne" ? (empty(d.d) ? hm : Number(d.d)) : (hob > 0 ? hob : hm);
-      if (div > 0) mund += (cfg.mundur * hm - Number(d.b || 0)) / div;
+      mund += Number(cfg.mundur) * hm - Number(d.b || 0);
     }
-    const gryPrzel = h > 0 ? gry * hob / h : 0;
-    res[z] = { gry, gryPrzel, mund, total: gryPrzel + mund, h, hob };
+    // suma (gry + mundur) × procent obecnych (hob / h)
+    const suma = gry + mund, k = h > 0 ? hob / h : 0;
+    res[z] = { gry, mund, suma, k, gryPrzel: gry * k, mundPrzel: mund * k, total: suma * k, h, hob };
   }
   return res;
 }
@@ -118,19 +118,24 @@ export function alarmPoints(cfg, al, meldunki = []) {
   return res;
 }
 
+// --- Sprawności: punkty za przyznaną sprawność wg liczby gwiazdek
+export function sprawPts(cfg, s) { const p = cfg.sprawPkt || DEFAULT_CONFIG.sprawPkt; return Number(p[Number(s.gwiazdki) - 1] || 0); }
+
 export function quarterTotals(cfg, q, data, todayStr) {
   const st = streakPoints(cfg, q, data.zbiorki, data.akcje, todayStr);
-  const t = Object.fromEntries(ZASTEPY.map(z => [z, { zbiorki: st[z].total, akcje: 0, alarmy: 0, streak: st[z].n, log: st[z].log }]));
+  const t = Object.fromEntries(ZASTEPY.map(z => [z, { zbiorki: st[z].total, akcje: 0, alarmy: 0, sprawnosci: 0, streak: st[z].n, log: st[z].log }]));
   for (const a of data.akcje.filter(a => inQ(a.data, q))) {
     const r = akcjaPoints(cfg, a); for (const z of ZASTEPY) t[z].akcje += r[z].total;
   }
   for (const al of data.alarmy.filter(a => inQ(a.data, q))) {
     const r = alarmPoints(cfg, al, data.meldunki || []); for (const z of ZASTEPY) t[z].alarmy += r[z].total;
   }
+  for (const s of (data.sprawnosci || []).filter(s => s.status === "przyznana" && inQ(s.data, q)))
+    if (t[s.zastep]) t[s.zastep].sprawnosci += sprawPts(cfg, s);
   // ręczne korekty kadry (+/−) doliczane do swojej kategorii
   for (const k of (data.korekty || []).filter(k => inQ(k.data, q)))
-    if (t[k.zastep] && ["zbiorki", "akcje", "alarmy"].includes(k.kategoria)) t[k.zastep][k.kategoria] += Number(k.pkt) || 0;
-  for (const z of ZASTEPY) t[z].suma = t[z].zbiorki + t[z].akcje + t[z].alarmy;
+    if (t[k.zastep] && ["zbiorki", "akcje", "alarmy", "sprawnosci"].includes(k.kategoria)) t[k.zastep][k.kategoria] += Number(k.pkt) || 0;
+  for (const z of ZASTEPY) t[z].suma = t[z].zbiorki + t[z].akcje + t[z].alarmy + t[z].sprawnosci;
   return t;
 }
 
