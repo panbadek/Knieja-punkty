@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-162342";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-162342";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-165527";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-165527";
 
-const BUILD = "20261022-162342";
+const BUILD = "20261022-165527";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -77,7 +77,7 @@ onAuthStateChanged(auth, async u => {
 function pickQuarter() { const t = today(); const i = S.cfg.kwartaly.findIndex(q => t >= q.start && t <= q.end); if (i >= 0 && S._qset !== true) S.q = i; }
 
 // ---------- nawigacja
-const TABS = [["wyniki","🏆 Wyniki"],["zbiorki","🔥 Zbiórki zastępu"],["akcje","⛺ Zbiórki drużyny / biwaki"],["alarmy","🚨 Alarmy"],["ustawienia","⚙️ Ustawienia"],["uzytkownicy","👥 Użytkownicy"]];
+const TABS = [["wyniki","🏆 Wyniki"],["zbiorki","🔥 Zbiórki zastępu"],["akcje","⛺ Zbiórki drużyny / biwaki"],["alarmy","🚨 Alarmy"],["ja","👤 Ja"],["ustawienia","⚙️ Ustawienia"],["uzytkownicy","👥 Użytkownicy"]];
 const ROLA_TXT = () => ({ admin: "kadra · administrator", kadra: isAdmin() ? "kadra · administrator" : "kadra", zastepowy: "zastępowy · " + (S.profile?.zastep || "bez zastępu"),
   szeregowy: "szeregowy · " + (S.profile?.zastep || "bez zastępu"), brak: "konto nieaktywne" }[rola()] || (S.user && !S.profile ? "konto nieaktywne" : ""));
 function renderChrome() {
@@ -85,7 +85,7 @@ function renderChrome() {
   $("#authbox").innerHTML = S.user ? `<button id="out">Wyloguj</button>` : `<button id="in">Zaloguj</button>`;
   $("#out") && ($("#out").onclick = () => signOut(auth));
   $("#in") && ($("#in").onclick = () => { S.tab = "login"; render(); });
-  const vis = TABS.filter(([k]) => k === "uzytkownicy" ? isAdmin() : k === "ustawienia" ? isKadra() : true);
+  const vis = TABS.filter(([k]) => ["uzytkownicy", "ustawienia"].includes(k) ? isKadra() : k === "ja" ? !!(S.user && S.profile) : true);
   $("#nav").innerHTML = vis.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join("");
   $("#nav").querySelectorAll("button").forEach(b => b.onclick = () => { S.tab = b.dataset.t; S.edit = null; S.view = null; S.back = null; render(); });
 }
@@ -99,7 +99,7 @@ function render() {
   renderChrome(); const ver = $("#ver");
   if (ver) ver.textContent = "wersja " + BUILD + (S.user ? ` · konto ${S.user.uid.slice(0, 6)} · ` + (S.profErr ? `błąd profilu: ${S.profErr}`
     : !S.profile ? "brak profilu" : `rola: ${S.profile.rola}` + (["kadra", "admin"].includes(S.profile.rola) ? ` · admin: ${S.profile.admin === true ? "tak" : S.profile.admin === undefined ? "brak pola" : JSON.stringify(S.profile.admin)}` : "")) : "") + (S.diag ? " · " + S.diag : "");
-  const views = { wyniki: vWyniki, zbiorki: vZbiorki, akcje: vAkcje, alarmy: vAlarmy, ustawienia: vUstawienia, uzytkownicy: vUsers, login: vLogin };
+  const views = { wyniki: vWyniki, zbiorki: vZbiorki, akcje: vAkcje, alarmy: vAlarmy, ustawienia: vUstawienia, uzytkownicy: vUsers, login: vLogin, ja: vJa };
   $("#main").innerHTML = (views[S.tab] || vWyniki)();
   bindQuarter(); (binders[S.tab] || (() => {}))();
 }
@@ -679,6 +679,84 @@ function bindZbiorkaEdit() {
   };
 }
 
+// ---------- JA (każdy zalogowany)
+const who = r => `<span class="perm">${{ kadra: "🔒 zmienia kadra", admin: "🔒 zmienia administrator", ty: "✏️ zmieniasz Ty" }[r]}</span>`;
+const field = (label, value, r) => `<div class="fld"><div class="mut">${label}</div><div class="fv">${value}</div>${r ? who(r) : ""}</div>`;
+const tile = (label, value, sub = "") => `<div class="tile"><div class="mut">${label}</div><b>${value}</b>${sub ? `<div class="mut">${sub}</div>` : ""}</div>`;
+function vJa() {
+  if (!S.user || !S.profile) return `<div class="card"><p>Zaloguj się, żeby zobaczyć swoje dane.</p></div>`;
+  const p = S.profile, z = p.zastep, uid = S.user.uid, q = currentQ() || quarter();
+  const inQq = d => d >= q.start && d <= q.end;
+  // --- sekcja: zastęp
+  let zast;
+  if (!ZASTEPY.includes(z)) zast = `<p class="mut">Nie należysz do żadnego zastępu.</p>`;
+  else {
+    const t = quarterTotals(S.cfg, q, S, today());
+    const order = [...ZASTEPY].sort((a, b) => t[b].suma - t[a].suma);
+    const place = 1 + order.filter(x => t[x].suma > t[z].suma).length;
+    const zb = S.zbiorki.filter(x => x.zastep === z && x.status === "zatwierdzona" && inQq(x.data));
+    const wk = fmtD(monday(parseD(today())));
+    const doneThisWeek = zb.some(x => fmtD(monday(parseD(x.data))) === wk);
+    const pendThisWeek = S.zbiorki.some(x => x.zastep === z && x.status === "oczekuje" && fmtD(monday(parseD(x.data))) === wk);
+    const n = t[z].streak, next = S.cfg.base * (1 + n * S.cfg.step);
+    const al = S.alarmy.filter(a => inQq(a.data));
+    const alDone = al.filter(a => S.meldunki.some(m => m.alarmId === a.id && m.zastep === z && m.status === "zaakceptowany")).length;
+    const meldOk = S.meldunki.filter(m => m.zastep === z && m.status === "zaakceptowany" && al.some(a => a.id === m.alarmId)).length;
+    zast = `<div class="tiles">
+      ${tile("Miejsce w rankingu", `${place}. <span class="mut">/ ${ZASTEPY.length}</span>`)}
+      ${tile("Punkty zastępu", frac(t[z].suma))}
+      ${tile("Zatwierdzone zbiórki", zb.length)}
+      ${tile("Streak", n ? "🔥 " + n : "0", n ? `${n} ${plural(n, "tydzień", "tygodnie", "tygodni")} z rzędu` : "")}
+      ${tile("Następna zbiórka", "+" + frac(next) + " pkt", doneThisWeek ? "w przyszłym tygodniu" : "w tym tygodniu" + (pendThisWeek ? " (zgłoszona, czeka na zatwierdzenie)" : ""))}
+      ${tile("Wykonane alarmy", alDone, `${meldOk} ${plural(meldOk, "zaakceptowany meldunek", "zaakceptowane meldunki", "zaakceptowanych meldunków")}`)}
+    </div>`;
+  }
+  // --- sekcja: dane użytkownika
+  const dane = `${field("Imię i nazwisko", esc(p.imie || "–"), "admin")}
+    ${field("Login", esc(p.login || loginOf(S.user.email)), "admin")}
+    ${field("Funkcja", ROLE_PL[p.rola] || esc(p.rola || "–"), "kadra")}
+    ${field("Zastęp", ZASTEPY.includes(z) ? z : "–", "kadra")}
+    ${["kadra", "admin"].includes(p.rola) ? field("Administrator", isAdmin() ? "tak 🛡" : "nie", "admin") : ""}
+    <div class="fld"><div class="mut">Hasło</div>${who("ty")}
+      <div class="row"><input id="pw_cur" type="password" placeholder="Obecne hasło" autocomplete="current-password"></div>
+      <div class="row"><input id="pw_new" type="password" placeholder="Nowe hasło (min. 6 znaków)" autocomplete="new-password"></div>
+      <div class="row"><input id="pw_new2" type="password" placeholder="Powtórz nowe hasło" autocomplete="new-password"></div>
+      <div class="row"><button class="pri" id="pwsave">Zmień hasło</button></div>
+      <p class="mut">Hasło jest zapisane w aplikacji, żeby administrator mógł Ci je zresetować, gdy zapomnisz. Nie używaj hasła, którego używasz gdzie indziej.</p></div>`;
+  // --- sekcja: inne
+  const my = S.meldunki.filter(m => m.uid === uid && S.alarmy.some(a => a.id === m.alarmId && inQq(a.data)));
+  const cnt = st => my.filter(m => m.status === st).length;
+  const myZb = S.zbiorki.filter(x => x.autor === uid && inQq(x.data));
+  const inne = `<div class="tiles">
+      ${canMeldowac() || my.length ? tile("Twoje alarmy", cnt("zaakceptowany"), `zaakceptowane · ${cnt("oczekuje")} czeka · ${cnt("odrzucony")} odrzucone`) : ""}
+      ${rola() === "zastepowy" || myZb.length ? tile("Zgłoszone przez Ciebie zbiórki", myZb.filter(x => x.status === "zatwierdzona").length, `zatwierdzone · ${myZb.filter(x => x.status === "oczekuje").length} czeka`) : ""}
+    </div>
+    <p class="mut">Adres aplikacji: <b>panbadek.github.io/Knieja-punkty</b> · wersja ${BUILD}</p>
+    <div class="row"><button id="jaout">Wyloguj się</button></div>`;
+  return `<div class="card"><h2>🏕 Zastęp${ZASTEPY.includes(z) ? ": " + z : ""}</h2><p class="mut">Kwartał: ${esc(q.nazwa)} (${plDay(q.start)} – ${plDay(q.end)})</p>${zast}</div>
+    <div class="card"><h2>👤 Dane użytkownika</h2>${dane}</div>
+    <div class="card"><h2>📌 Inne</h2>${inne}</div>`;
+}
+binders.ja = () => {
+  $("#jaout") && ($("#jaout").onclick = () => signOut(auth));
+  $("#pwsave") && ($("#pwsave").onclick = async () => {
+    const cur = $("#pw_cur").value, n1 = $("#pw_new").value, n2 = $("#pw_new2").value, btn = $("#pwsave");
+    if (!cur) return alert("Wpisz obecne hasło");
+    if (n1.length < 6) return alert("Nowe hasło musi mieć co najmniej 6 znaków");
+    if (n1 !== n2) return alert("Nowe hasła nie są takie same");
+    if (n1 === cur) return alert("Nowe hasło musi być inne niż obecne");
+    btn.disabled = true; btn.textContent = "Zmieniam…"; S.busy = true;
+    try {
+      try { await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, cur)); }
+      catch (e) { throw new Error("Obecne hasło jest nieprawidłowe"); }
+      await updatePassword(auth.currentUser, n1);
+      await setDoc(doc(db, "sekrety", S.user.uid), { haslo: n1 }).catch(() => {});
+      alert("Hasło zostało zmienione.");
+    } catch (e) { alert(e.message || e); }
+    S.busy = false; render();
+  });
+};
+
 // ---------- USTAWIENIA (kadra)
 function vUstawienia() {
   const c = S.cfg, list = (k, n) => `<input data-c="${k}" value="${(c[k] || []).join(", ")}" style="width:100%" title="${n}">`;
@@ -731,20 +809,31 @@ const genPass = () => { const a = "abcdefghjkmnpqrstuvwxyz23456789"; return Arra
 const emptyUser = () => ({ imie: "", login: "", haslo: genPass(), rola: "szeregowy", zastep: "" });
 
 function vUsers() {
-  if (!isAdmin()) return `<div class="card"><p class="err">Tylko administrator zarządza kontami.</p></div>`;
+  if (!isKadra()) return `<div class="card"><p class="err">Tylko kadra ma dostęp do kont.</p></div>`;
   if (S.edit?.kind === "user") return vUserEdit();
+  const adm = isAdmin();
   const users = [...S.users].sort((a, b) => (a.zastep || "~").localeCompare(b.zastep || "~") || (a.imie || "").localeCompare(b.imie || ""));
-  return `<div class="card"><h2>Konta</h2><div class="row"><button class="pri" id="unew">+ Nowe konto</button></div>
-   <div class="scroll"><table><tr><th>Imię i nazwisko</th><th>Login</th><th>Hasło</th><th>Funkcja</th><th>Zastęp</th><th></th></tr>
+  return `<div class="card"><h2>Konta</h2>${adm ? `<div class="row"><button class="pri" id="unew">+ Nowe konto</button></div>` : ""}
+   <div class="scroll"><table><tr><th>Imię i nazwisko</th><th>Login</th>${adm ? "<th>Hasło</th>" : ""}<th>Funkcja</th><th>Zastęp</th><th></th></tr>
    ${users.map(u => `<tr><td>${esc(u.imie)}${u.id === S.user.uid ? ` <span class="badge">Ty</span>` : ""}</td><td>${esc(loginOfUser(u))}</td>
-   <td>${S.secrets?.[u.id] ? `<button data-show="${u.id}" class="mut">pokaż</button>` : `<span class="mut">nieznane</span>`}</td>
+   ${adm ? `<td>${S.secrets?.[u.id] ? `<button data-show="${u.id}" class="mut">pokaż</button>` : `<span class="mut">nieznane</span>`}</td>` : ""}
    <td>${ROLE_PL[u.rola] || `<span class="err">${esc(u.rola || "brak")}</span>`}${isAdm(u) ? ` <span class="badge ok">🛡 admin</span>` : ""}</td>
    <td>${ZASTEPY.includes(u.zastep) ? u.zastep : (["zastepowy", "szeregowy"].includes(u.rola) ? `<span class="err">⚠ brak</span>` : "–")}</td>
    <td><button data-ue="${u.id}">Edytuj</button></td></tr>`).join("")}</table></div>
-   <p class="mut">Tylko administrator zakłada i usuwa konta oraz zmienia imię i nazwisko, login, hasło, zastęp i funkcję.</p></div>`;
+   <p class="mut">Kadra zmienia funkcję i zastęp. Administrator dodatkowo zakłada i usuwa konta, zmienia imię i nazwisko, login, hasło i uprawnienia administratora. Hasło każdy może też zmienić sam w zakładce „👤 Ja”.</p></div>`;
 }
 function vUserEdit() {
   const u = S.edit.d, isNew = !S.edit.id, self = S.edit.id === S.user.uid, known = !!S.secrets?.[S.edit.id];
+  if (!isAdmin()) {                                   // kadra bez uprawnień administratora: tylko funkcja i zastęp
+    const lock = self || u.admin;
+    return `<div class="card"><h2>Edycja konta</h2>
+     <p><b>${esc(u.imie)}</b> <span class="mut">· login: ${esc(u.login)}</span></p>
+     <div class="row"><label>Funkcja<br><select id="f_rola" ${lock ? "disabled" : ""}>${ROLE.map(([v, l]) => `<option value="${v}" ${u.rola === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+     <label>Zastęp<br><select id="f_zastep" ${lock ? "disabled" : ""}><option value="">–</option>${ZASTEPY.map(z => `<option ${u.zastep === z ? "selected" : ""}>${z}</option>`).join("")}</select></label></div>
+     ${lock ? `<p class="mut">${self ? "Własnej funkcji i zastępu nie zmieniasz sam — poproś innego członka kadry." : "To konto administratora — zmienia je inny administrator."}</p>` : ""}
+     <p class="mut">Imię i nazwisko, login, hasło i uprawnienia administratora zmienia administrator.</p>
+     <div class="row">${lock ? "" : `<button class="pri" id="usave">Zapisz</button>`}<button id="cancel">Anuluj</button></div></div>`;
+  }
   return `<div class="card"><h2>${isNew ? "Nowe konto" : "Edycja konta"}</h2>
    <div class="row"><label>Imię i nazwisko<br><input id="f_imie" value="${esc(u.imie)}" autocapitalize="words"></label></div>
    <div class="row"><label>Login<br><input id="f_login" value="${esc(u.login)}" autocapitalize="none" spellcheck="false"></label></div>
@@ -760,14 +849,21 @@ function vUserEdit() {
    ${!isNew && !self ? `<button class="del" id="udel">Usuń konto</button>` : ""}</div></div>`;
 }
 binders.uzytkownicy = () => {
-  if (!isAdmin()) return;
+  if (!isKadra()) return;
   if (S.edit?.kind === "user") return bindUserEdit();
-  $("#unew").onclick = () => { S.edit = { kind: "user", d: emptyUser() }; render(); };
+  $("#unew") && ($("#unew").onclick = () => { S.edit = { kind: "user", d: emptyUser() }; render(); });
   $$("[data-ue]").forEach(b => b.onclick = () => { const u = S.users.find(x => x.id === b.dataset.ue);
     S.edit = { kind: "user", id: u.id, d: { ...u, login: loginOfUser(u), rola: u.rola === "admin" ? "kadra" : u.rola, admin: isAdm(u) } }; render(); });
   $$("[data-show]").forEach(b => b.onclick = () => { b.textContent = S.secrets[b.dataset.show]; b.classList.remove("mut"); });
 };
 function bindUserEdit() {
+  if (!isAdmin()) {
+    $("#cancel").onclick = () => { S.edit = null; render(); };
+    $("#usave") && ($("#usave").onclick = () => { const rola = $("#f_rola").value, zastep = $("#f_zastep").value;
+      if (["szeregowy", "zastepowy"].includes(rola) && !zastep) return alert("Wybierz zastęp");
+      busy($("#usave"), "Zapisuję…", () => updateDoc(doc(db, "users", S.edit.id), { rola, zastep })); });
+    return;
+  }
   $("#f_imie").oninput = () => { if (!S.edit.id && !S.edit.loginTouched) $("#f_login").value = normLogin($("#f_imie").value); };
   $("#f_login").oninput = () => { S.edit.loginTouched = true; };
   $("#f_rola").onchange = () => { $("#adminRow").hidden = $("#f_rola").value !== "kadra"; };

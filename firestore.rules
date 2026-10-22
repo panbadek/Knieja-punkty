@@ -19,8 +19,12 @@ service cloud.firestore {
       allow read: if signed() && (request.auth.uid == uid || kadra());
       allow create: if admin();
       // własnej funkcji i uprawnień administratora nie można sobie zmienić — robi to inny administrator
-      allow update: if admin() && (uid != request.auth.uid ||
-        (request.resource.data.rola == resource.data.rola && request.resource.data.get('admin', false) == resource.data.get('admin', false)));
+      allow update: if (admin() && (uid != request.auth.uid ||
+          (request.resource.data.rola == resource.data.rola && request.resource.data.get('admin', false) == resource.data.get('admin', false))))
+        // kadra: tylko funkcja i zastęp innych osób (nie administratorów)
+        || (kadra() && uid != request.auth.uid && resource.data.get('admin', false) != true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rola', 'zastep'])
+          && request.resource.data.rola in ['szeregowy', 'zastepowy', 'kadra']);
       allow delete: if admin() && uid != request.auth.uid;
     }
     match /loginy/{login} {
@@ -28,7 +32,8 @@ service cloud.firestore {
       allow list, write: if admin();
     }
     match /sekrety/{uid} {
-      allow read, write: if admin();
+      allow read: if admin();
+      allow write: if admin() || (signed() && request.auth.uid == uid);   // własne hasło po samodzielnej zmianie
     }
 
     match /zbiorkiZastepu/{id} {
