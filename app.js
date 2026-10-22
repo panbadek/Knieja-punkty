@@ -1,13 +1,13 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signOut, updatePassword, deleteUser }
+  signOut, updatePassword, deleteUser, reauthenticateWithCredential, EmailAuthProvider }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-003655";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-003655";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-074649";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-074649";
 
-const BUILD = "20261022-003655";
+const BUILD = "20261022-074649";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -535,7 +535,8 @@ function vUserEdit() {
    <div class="row"><label>Imię i nazwisko<br><input id="f_imie" value="${esc(u.imie)}" autocapitalize="words"></label></div>
    <div class="row"><label>Login<br><input id="f_login" value="${esc(u.login)}" autocapitalize="none" spellcheck="false"></label></div>
    <div class="row"><label>Hasło${isNew ? "" : " (puste = bez zmian)"}<br><input id="f_haslo" value="${esc(isNew ? u.haslo : "")}" autocapitalize="none" spellcheck="false" placeholder="${isNew ? "" : (known ? "••••••" : "")}"></label></div>
-   ${!isNew && !known ? `<div class="row"><label>Obecne hasło <span class="mut">(potrzebne do zmiany hasła lub usunięcia — nie jest zapisane w aplikacji)</span><br><input id="f_old" autocapitalize="none" spellcheck="false"></label></div>` : ""}
+   ${!isNew ? `<div class="row"><label>Twoje hasło administratora <span class="mut">(potwierdzenie przy zmianie hasła lub usuwaniu konta)</span><br><input id="f_adm" type="password" autocomplete="current-password"></label></div>
+   ${!known && !self ? `<p class="mut">⚠ To konto założono przed zmianami — jego hasła nie da się zmienić z aplikacji. Jeśli trzeba, usuń je i załóż na nowo.</p>` : ""}` : ""}
    <div class="row"><label>Funkcja<br><select id="f_rola" ${self ? "disabled" : ""}>${ROLE.map(([v, l]) => `<option value="${v}" ${u.rola === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
    <label>Zastęp<br><select id="f_zastep"><option value="">–</option>${ZASTEPY.map(z => `<option ${u.zastep === z ? "selected" : ""}>${z}</option>`).join("")}</select></label></div>
    <div class="row" id="adminRow" ${u.rola === "kadra" ? "" : "hidden"}><label class="sw"><input type="checkbox" id="f_admin" ${u.admin ? "checked" : ""} ${self ? "disabled" : ""}><span></span> Administrator</label>
@@ -568,11 +569,12 @@ async function busy(btn, label, fn) {
 function saveUser(btn) {
   const id = S.edit.id, old = S.edit.d;
   const imie = $("#f_imie").value.trim().replace(/\s+/g, " "), login = normLogin($("#f_login").value), haslo = $("#f_haslo").value;
-  const rolaV = $("#f_rola").value, adminV = rolaV === "kadra" && $("#f_admin").checked, zastep = $("#f_zastep").value, oldPass = S.secrets?.[id] || $("#f_old")?.value || "";
+  const rolaV = $("#f_rola").value, adminV = rolaV === "kadra" && $("#f_admin").checked, zastep = $("#f_zastep").value, admPass = $("#f_adm")?.value || "";
   if (imie.length < 2) return alert("Wpisz imię i nazwisko");
   if (login.length < 2) return alert("Wpisz login");
   if ((!id || haslo) && haslo.length < 6) return alert("Hasło musi mieć co najmniej 6 znaków");
   if (["szeregowy", "zastepowy"].includes(rolaV) && !zastep) return alert("Wybierz zastęp");
+  if (id && haslo && !admPass) return alert("Wpisz swoje hasło administratora, żeby potwierdzić zmianę hasła");
   busy(btn, "Zapisuję…", async () => {
     if (await loginTaken(login, id)) throw new Error("Ten login jest już zajęty");
     if (!id) {                                   // nowe konto
@@ -585,9 +587,14 @@ function saveUser(btn) {
       alert(`Konto utworzone.\nLogin: ${login}\nHasło: ${haslo}`);
       return;
     }
-    if (haslo) {                                 // zmiana hasła
-      if (!oldPass) throw new Error("Wpisz obecne hasło tej osoby — bez niego nie da się go zmienić");
-      await asUser(old.email, oldPass, u => updatePassword(u, haslo));
+    if (haslo) {                                 // zmiana hasła (potwierdzona hasłem administratora)
+      await confirmAdmin(admPass);
+      if (id === S.user.uid) await updatePassword(auth.currentUser, haslo);          // własne hasło
+      else {
+        const cur = S.secrets?.[id];
+        if (!cur) throw new Error("Hasło tego konta nie jest zapisane (konto sprzed zmian). Usuń je i załóż na nowo.");
+        await asUser(old.email, cur, u => updatePassword(u, haslo));
+      }
       await setDoc(doc(db, "sekrety", id), { haslo });
     }
     const oldLogin = loginOfUser(old);
@@ -599,13 +606,20 @@ function saveUser(btn) {
     await updateDoc(doc(db, "users", id), upd);
   });
 }
+// Potwierdzenie hasłem zalogowanego administratora (ponowne uwierzytelnienie w Firebase).
+async function confirmAdmin(pass) {
+  try { await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, pass)); }
+  catch (e) { throw new Error("Złe hasło administratora"); }
+}
 function removeUser(btn) {
-  const id = S.edit.id, u = S.edit.d, pass = S.secrets?.[id] || $("#f_old")?.value || "";
+  const id = S.edit.id, u = S.edit.d, pass = S.secrets?.[id], admPass = $("#f_adm")?.value || "";
+  if (!admPass) return alert("Wpisz swoje hasło administratora, żeby potwierdzić usunięcie");
   if (!confirm(`Usunąć konto ${u.imie}? Tej operacji nie da się cofnąć.`)) return;
   busy(btn, "Usuwam…", async () => {
+    await confirmAdmin(admPass);
     let authNote = "";
     if (pass) await asUser(u.email, pass, x => deleteUser(x));
-    else authNote = "\n\nNie podano hasła, więc konto logowania zostało w Firebase (Authentication → Users), ale nie da się już na nim nic zrobić.";
+    else authNote = "\n\nTo konto założono przed zmianami, więc jego dane logowania zostały w Firebase (Authentication → Users), ale nie da się już na nim nic zrobić.";
     await deleteDoc(doc(db, "loginy", loginOfUser(u))).catch(() => {});
     await deleteDoc(doc(db, "sekrety", id)).catch(() => {});
     await deleteDoc(doc(db, "users", id));
