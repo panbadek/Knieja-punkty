@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-173300";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-173300";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-174615";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-174615";
 
-const BUILD = "20261022-173300";
+const BUILD = "20261022-174615";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -1044,7 +1044,7 @@ function vUserEdit() {
    <div class="row"><label>Login<br><input id="f_login" value="${esc(u.login)}" autocapitalize="none" spellcheck="false"></label></div>
    <div class="row"><label>Hasło${isNew ? "" : " (puste = bez zmian)"}<br><input id="f_haslo" value="${esc(isNew ? u.haslo : "")}" autocapitalize="none" spellcheck="false" placeholder="${isNew ? "" : (known ? "••••••" : "")}"></label></div>
    ${!isNew ? `<div class="row"><label>Twoje hasło administratora <span class="mut">(potwierdzenie przy zmianie hasła lub usuwaniu konta)</span><br><input id="f_adm" type="password" autocomplete="current-password"></label></div>
-   ${!known && !self ? `<p class="mut">⚠ To konto założono przed zmianami — jego hasła nie da się zmienić z aplikacji. Jeśli trzeba, usuń je i załóż na nowo.</p>` : ""}` : ""}
+   ${!known && !self ? `<p class="mut">⚠ Hasło tego konta nie jest zapisane. Przy zmianie hasła aplikacja odtworzy konto z tym samym loginem, imieniem, funkcją i zastępem.</p>` : ""}` : ""}
    <div class="row"><label>Funkcja<br><select id="f_rola" ${self ? "disabled" : ""}>${ROLE.map(([v, l]) => `<option value="${v}" ${u.rola === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
    <label>Zastęp<br><select id="f_zastep"><option value="">–</option>${ZASTEPY.map(z => `<option ${u.zastep === z ? "selected" : ""}>${z}</option>`).join("")}</select></label></div>
    <div class="row" id="adminRow" ${u.rola === "kadra" ? "" : "hidden"}><label class="sw"><input type="checkbox" id="f_admin" ${u.admin ? "checked" : ""} ${self ? "disabled" : ""}><span></span> Administrator</label>
@@ -1079,7 +1079,7 @@ function bindUserEdit() {
 async function busy(btn, label, fn) {
   const t = btn.textContent; btn.disabled = true; btn.textContent = label; S.busy = true;
   try { await fn(); S.edit = null; S.busy = false; render(); }
-  catch (e) { S.busy = false; btn.disabled = false; btn.textContent = t; alert(PL_ERR[e.code] || ("Błąd: " + (e.message || e))); }
+  catch (e) { S.busy = false; btn.disabled = false; btn.textContent = t; if (e.message !== "Anulowano") alert(PL_ERR[e.code] || ("Błąd: " + (e.message || e))); }
 }
 function saveUser(btn) {
   const id = S.edit.id, old = S.edit.d;
@@ -1106,8 +1106,17 @@ function saveUser(btn) {
       await confirmAdmin(admPass);
       if (id === S.user.uid) await updatePassword(auth.currentUser, haslo);          // własne hasło
       else {
-        const cur = S.secrets?.[id];
-        if (!cur) throw new Error("Hasło tego konta nie jest zapisane (konto sprzed zmian). Usuń je i załóż na nowo.");
+        let cur = S.secrets?.[id];
+        if (!cur) {
+          try { cur = (await getDoc(doc(db, "sekrety", id))).data()?.haslo; }
+          catch (e) { throw new Error("Brak dostępu do zapisanych haseł — sprawdź, czy reguły w Firebase są aktualne."); }
+        }
+        if (!cur) {                                // hasło nieznane → odtworzenie konta z nowym hasłem
+          if (!confirm(`Hasło konta „${imie}” nie jest zapisane, więc nie da się go zmienić bezpośrednio.\n\nUtworzyć to konto na nowo z tym samym loginem, imieniem, funkcją i zastępem oraz nowym hasłem?`)) throw new Error("Anulowano");
+          await recreateUser(id, old, { imie, login, rola: id === S.user.uid ? old.rola : rolaV, admin: adminV, zastep, haslo });
+          alert(`Konto odtworzone.\nLogin: ${login}\nHasło: ${haslo}`);
+          return;
+        }
         await asUser(old.email, cur, u => updatePassword(u, haslo));
       }
       await setDoc(doc(db, "sekrety", id), { haslo });
@@ -1120,6 +1129,18 @@ function saveUser(btn) {
     const upd = { imie, login, zastep }; if (id !== S.user.uid) { upd.rola = rolaV; upd.admin = adminV; }
     await updateDoc(doc(db, "users", id), upd);
   });
+}
+// Odtworzenie konta bez zapisanego hasła: nowe konto logowania, ten sam login i dane; stare przestaje działać.
+async function recreateUser(oldId, old, d) {
+  const email = "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + DOMAIN;
+  const c = await createUserWithEmailAndPassword(secAuth(), email, d.haslo); await signOut(secAuth()).catch(() => {});
+  const uid = c.user.uid;
+  await setDoc(doc(db, "users", uid), { email, login: d.login, imie: d.imie, rola: d.rola, admin: !!d.admin, zastep: d.zastep, poprzednieId: oldId });
+  await setDoc(doc(db, "loginy", d.login), { email, uid });
+  if (loginOfUser(old) !== d.login) await deleteDoc(doc(db, "loginy", loginOfUser(old))).catch(() => {});
+  await setDoc(doc(db, "sekrety", uid), { haslo: d.haslo });
+  await deleteDoc(doc(db, "sekrety", oldId)).catch(() => {});
+  await deleteDoc(doc(db, "users", oldId));
 }
 // Potwierdzenie hasłem zalogowanego administratora (ponowne uwierzytelnienie w Firebase).
 async function confirmAdmin(pass) {
