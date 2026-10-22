@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261023-002516";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261023-002516";
+import { firebaseConfig } from "./firebase-config.js?v=20261023-010658";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261023-010658";
 
-const BUILD = "20261023-002516";
+const BUILD = "20261023-010658";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -192,11 +192,11 @@ function vZbiorki() {
     : `<div class="card"><h2>Zgłoś zbiórkę zastępu</h2><div class="row">
     <select id="zz" ${mine ? "disabled" : ""}>${ZASTEPY.map(z => `<option ${z === (mine || S.zzZ) ? "selected" : ""}>${z}</option>`).join("")}</select>
     <input id="zd" type="date" value="${today()}" min="${cq.start}" max="${cq.end}"><input id="zo" placeholder="krótki opis (opcjonalnie)"></div>
-    <div class="row"><label class="sw"><input type="checkbox" id="zs_on" ${S.zsOn ? "checked" : ""}><span></span> Cały zastęp był na zbiórce i zdobył sprawność</label></div>
+    <div class="row"><label class="sw"><input type="checkbox" id="zs_on" ${S.zsOn ? "checked" : ""}><span></span> Cały zastęp był na zbiórce i robił sprawność</label></div>
     <div id="zs_box" class="za" ${S.zsOn ? "" : "hidden"}>
       <div class="row"><label style="flex:1">Nazwa sprawności<br><input id="zs_n" list="sp_names" placeholder="np. Kucharz" autocomplete="off" style="width:100%"></label></div>${namesList()}
       <div class="row"><span class="mut">Gwiazdki:</span>${starBtns("zg", S.zsG || 1)}</div>
-      <p class="mut" id="zs_info">${calyInfo(mine || S.zzZ || ZASTEPY[0], S.zsG || 1)}</p>
+      <div id="zs_list"></div>
       <p class="mut">${isKadra() ? "Sprawność od razu zostanie przyznana (zakładka 🎖 Sprawności)." : "Sprawność kadra zatwierdza osobno, w zakładce 🎖 Sprawności."}</p></div>
     <div class="row"><button class="pri" id="zadd">Zgłoś</button></div>
     <p class="mut">Można zgłaszać tylko zbiórki z bieżącego kwartału: <b>${esc(cq.nazwa)}</b> (${plDay(cq.start)} – ${plDay(cq.end)}).<br>
@@ -228,7 +228,8 @@ function vZbiorki() {
 binders.zbiorki = () => {
   if (S.view?.kind === "hist") return bindHist("zbiorki");
   bindHistBtn();
-  const zInfo = () => { const el = $("#zs_info"); if (el) el.innerHTML = calyInfo(rola() === "zastepowy" ? S.profile.zastep : (S.zzZ || $("#zz")?.value), S.zsG || 1); };
+  const zZ = () => rola() === "zastepowy" ? S.profile.zastep : (S.zzZ || $("#zz")?.value);
+  const zInfo = bindCaly("zs", () => ({ z: zZ(), g: S.zsG || 1, nazwa: calyName("zs") }));
   $("#zz") && ($("#zz").onchange = e => { S.zzZ = e.target.value; zInfo(); });
   $("#zs_on") && ($("#zs_on").onchange = e => { S.zsOn = e.target.checked; $("#zs_box").hidden = !S.zsOn; });
   $$("[data-zg]").forEach(b => b.onclick = () => { S.zsG = +b.dataset.zg; $$("[data-zg]").forEach(x => x.classList.toggle("on", x === b)); zInfo(); });
@@ -238,15 +239,16 @@ binders.zbiorki = () => {
     if (!data) return alert("Wybierz datę");
     const cq = currentQ();
     if (!cq || data < cq.start || data > cq.end) return alert(`Można zgłaszać tylko zbiórki z bieżącego kwartału (${plDay(cq?.start)} – ${plDay(cq?.end)}).`);
-    const sp = S.zsOn ? { nazwa: ($("#zs_n")?.value || "").trim().replace(/\s+/g, " "), g: S.zsG || 1 } : null;
+    const sp = S.zsOn ? { nazwa: calyName("zs"), g: S.zsG || 1 } : null;
     if (sp && sp.nazwa.length < 2) return alert("Wpisz nazwę sprawności zdobytej przez zastęp (albo wyłącz tę opcję)");
-    const target = sp ? calyTarget(zastep) : null;
-    if (sp && !target.uczestnicy.length) return alert(`W zastępie ${zastep} nie ma jeszcze kont harcerzy, więc nie da się dodać sprawności całego zastępu.`);
+    const target = sp ? calyTarget(zastep, sp.g, sp.nazwa) : null;
+    if (sp && !target.uczestnicy.length && !target.mieli.length) return alert(`W zastępie ${zastep} nie ma jeszcze kont harcerzy, więc nie da się dodać sprawności całego zastępu.`);
+    if (sp && !target.uczestnicy.length) return alert("Zaznacz, kto zdobył sprawność (nikt nie ma „✔ zdobył(a)”).");
     const btn = $("#zadd"); btn.disabled = true; let ref = null;
     try {
       ref = await addDoc(collection(db, "zbiorkiZastepu"), { zastep, data, opis: $("#zo").value, status: "oczekuje", autor: S.user.uid, utworzono: serverTimestamp() });
       if (sp) await addDoc(collection(db, "sprawnosci"), sprawDoc({ nazwa: sp.nazwa, g: sp.g, data, target, zbiorkaId: ref.id }));
-      S.zsOn = false; ["#zo", "#zs_n"].forEach(k => { const o = $(k); if (o) o.value = ""; }); render();
+      S.zsOn = false; S.cm = {}; S.cn = {}; ["#zo", "#zs_n"].forEach(k => { const o = $(k); if (o) o.value = ""; }); render();
     } catch (e) { err(ref ? "Zbiórka została zgłoszona, ale sprawności nie udało się zapisać" + (e.code === "permission-denied" ? " (kadra musi wkleić nowe reguły w Firebase)." : ": " + (e.message || e)) : e); }
     const b2 = $("#zadd"); if (b2) b2.disabled = false;
   });
@@ -631,14 +633,39 @@ const byName = (x, y) => (x.imie || "").localeCompare(y.imie || "", "pl");
 const czlonkowie = z => (isKadra() ? S.users : (S.zUsers || [])).filter(u => u.zastep === z && ["szeregowy", "zastepowy"].includes(u.rola))
   .sort(byName).map(u => ({ uid: u.id, imie: u.imie || loginOfUser(u) }));
 const isMineSpr = (s, uid) => s.caly ? (s.uczestnicy || []).some(u => u.uid === uid) : s.uid === uid;
-const calyInfo = (z, g) => { const c = czlonkowie(z), one = sprawPts(S.cfg, { gwiazdki: g });
-  return c.length ? `Każdy z zastępu dostaje tę sprawność, a punkty liczą się tak, jakby każdy zdobył ją 2 razy: <b>${c.length} os. × 2 × ${frac(one)} = ${frac(c.length * 2 * one)} pkt</b> dla zastępu.<br>${c.map(u => esc(u.imie)).join(", ")}`
-    : `<span class="err">W zastępie ${esc(z)} nie ma jeszcze kont harcerzy — administrator musi je założyć.</span>`; };
+// Sprawność całego zastępu: zastępowy oznacza każdego harcerza — „zdobył(a)” albo „już ma (był(a) na zbiórce)”.
+S.cm = {}; S.cn = {};
+const names = l => (l || []).map(u => esc(u.imie)).join(", ");
+const hasSpr = (uid, nazwa, g) => !!nazwa && S.sprawnosci.some(s => s.status === "przyznana" && (s.nazwa || "").toLowerCase() === nazwa.toLowerCase()
+  && Number(s.gwiazdki) >= g && isMineSpr(s, uid));                          // ma już przyznaną (tyle samo albo więcej gwiazdek)
+const calyStan = (z, g, nazwa) => czlonkowie(z).map(u => { const ma = hasSpr(u.uid, nazwa, g); return { ...u, ma, st: S.cm[u.uid] || (ma ? "m" : "z") }; });
+function calyList(z, g, nazwa) {
+  const c = calyStan(z, g, nazwa);
+  if (!c.length) return `<p class="err">W zastępie ${esc(z)} nie ma jeszcze kont harcerzy — administrator musi je założyć.</p>`;
+  const earn = c.filter(u => u.st === "z").length, one = sprawPts(S.cfg, { gwiazdki: g });
+  return `<p class="mut">Zaznacz przy każdym harcerzu: zdobył(a) sprawność na tej zbiórce, czy już ją miał(a), ale był(a) na zbiórce.</p>
+    <div class="clist">${c.map(u => `<div class="crow"><span>${esc(u.imie)}${u.ma ? ` <span class="mut">· ma już w aplikacji</span>` : ""}</span>
+    <span class="seg"><button data-cm="${u.uid}|z" class="${u.st === "z" ? "on" : ""}">✔ zdobył(a)</button><button data-cm="${u.uid}|m" class="${u.st === "m" ? "on" : ""}">już ma</button></span></div>`).join("")}</div>
+    <p class="mut">${earn ? `Zdobyło: <b>${earn}</b> os.${c.length - earn ? ` · już miało: ${c.length - earn} os.` : ""} → <b>${earn} × 2 × ${frac(one)} = ${frac(earn * 2 * one)} pkt</b> dla zastępu (jakby każdy, kto zdobył, zdobył ją 2 razy).`
+      : `<span class="err">Nikt nie jest zaznaczony jako „zdobył(a)”.</span>`}</p>`;
+}
+const calySplit = (z, g, nazwa) => { const c = calyStan(z, g, nazwa), pick = st => c.filter(u => u.st === st).map(({ uid, imie }) => ({ uid, imie }));
+  return { uczestnicy: pick("z"), mieli: pick("m") }; };
+// podłącza listę w kontenerze #<px>_list; ctx() zwraca { z, g, nazwa } albo null (lista ukryta)
+function bindCaly(px, ctx) {
+  const box = $("#" + px + "_list"); if (!box) return () => {};
+  const draw = () => { const c = ctx(); box.hidden = !c; box.innerHTML = c ? calyList(c.z, c.g, c.nazwa) : "";
+    box.querySelectorAll("[data-cm]").forEach(b => b.onclick = () => { const [uid, st] = b.dataset.cm.split("|"); S.cm[uid] = st; draw(); }); };
+  const inp = $("#" + px + "_n"); inp && inp.addEventListener("input", () => { S.cn[px] = inp.value; draw(); });
+  draw(); return draw;
+}
+const calyName = px => (($("#" + px + "_n")?.value || S.cn[px] || "").trim().replace(/\s+/g, " "));
 const sprPtsTxt = s => s.caly ? `${(s.uczestnicy || []).length} × 2 × ${sprPk(s.gwiazdki)} = ${frac(sprawPts(S.cfg, s))} pkt` : `${frac(sprawPts(S.cfg, s))} pkt`;
-const sprKto = s => s.caly ? `<details><summary>👥 Cały zastęp · ${(s.uczestnicy || []).length} os.</summary><div class="mut">${(s.uczestnicy || []).map(u => esc(u.imie)).join(", ")}</div></details>` : esc(s.imie);
+const sprKto = s => s.caly ? `<details><summary>👥 Cały zastęp · ${(s.uczestnicy || []).length} zdobyło${(s.mieli || []).length ? ` · ${s.mieli.length} już miało` : ""}</summary>
+  <div class="mut">Zdobyli: ${names(s.uczestnicy) || "–"}${(s.mieli || []).length ? `<br>Już mieli (byli na zbiórce): ${names(s.mieli)}` : ""}</div></details>` : esc(s.imie);
 const starBtns = (attr, g) => [1, 2, 3].map(n => `<button data-${attr}="${n}" class="${g === n ? "on" : ""}"><span class="gw">${gw(n)}</span> <span class="mut">${sprPk(n)} pkt</span></button>`).join("");
 const namesList = () => `<datalist id="sp_names">${[...new Set(S.sprawnosci.map(x => x.nazwa).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pl")).map(n => `<option value="${esc(n)}">`).join("")}</datalist>`;
-const calyTarget = z => ({ caly: true, uid: S.user.uid, imie: `Cały zastęp ${z}`, zastep: z, uczestnicy: czlonkowie(z) });
+const calyTarget = (z, g, nazwa) => ({ caly: true, uid: S.user.uid, imie: `Cały zastęp ${z}`, zastep: z, ...calySplit(z, g, nazwa) });
 function sprawDoc({ nazwa, g, data, target, zbiorkaId }) {
   const kadra = isKadra();
   return { ...target, nazwa, gwiazdki: g, data, status: kadra ? "przyznana" : "oczekuje", autor: S.user.uid, autorImie: myName(), utworzono: serverTimestamp(),
@@ -657,7 +684,7 @@ function vSprawnosci() {
     else if (!isKadra() && !ZASTEPY.includes(mine)) form = `<div class="card"><h2>${title}</h2><p class="err">Nie masz przypisanego zastępu — poproś kadrę.</p></div>`;
     else {
       let whoSel = "";
-      const sel = v => S.spU === v ? "selected" : "", caly = z => `<option value="__caly:${z}" ${sel("__caly:" + z)}>👥 Cały zastęp ${z} (wszyscy zdobyli)</option>`;
+      const sel = v => S.spU === v ? "selected" : "", caly = z => `<option value="__caly:${z}" ${sel("__caly:" + z)}>👥 Cały zastęp ${z} (zbiórka całego zastępu)</option>`;
       if (isKadra()) {
         const c = S.users.filter(u => ["szeregowy", "zastepowy"].includes(u.rola) && ZASTEPY.includes(u.zastep));
         whoSel = `<select id="sp_u"><option value="">– wybierz harcerza –</option>${ZASTEPY.map(z => { const g = c.filter(u => u.zastep === z).sort(byName);
@@ -666,13 +693,13 @@ function vSprawnosci() {
         const c = (S.zUsers || []).filter(u => u.id !== me && u.zastep === mine).sort(byName);
         whoSel = `<select id="sp_u"><option value="${me}">Ja (${esc(myName())})</option>${c.map(u => `<option value="${u.id}" ${sel(u.id)}>${esc(u.imie || loginOfUser(u))}</option>`).join("")}${caly(mine)}</select>`;
       }
-      const g = S.spG || 1, cz = (S.spU || "").startsWith("__caly:") ? S.spU.slice(7) : null;
+      const g = S.spG || 1;
       form = `<div class="card"><h2>${title}</h2>
         ${whoSel ? `<div class="row"><label>Dla kogo<br>${whoSel}</label></div>` : ""}
         <div class="row"><label style="flex:1">Nazwa sprawności<br><input id="sp_n" list="sp_names" placeholder="np. Kucharz" autocomplete="off" style="width:100%"></label></div>
         ${namesList()}
         <div class="row"><span class="mut">Gwiazdki:</span>${starBtns("g", g)}</div>
-        <p class="mut" id="sp_info" ${cz ? "" : "hidden"}>${cz ? calyInfo(cz, g) : ""}</p>
+        <div id="sp_list" class="za" hidden></div>
         <div class="row"><button class="pri" id="sp_add">${isKadra() ? "✔ Przyznaj sprawność" : "📨 Wyślij wniosek"}</button></div>
         <p class="mut">${isKadra() ? "Sprawność dodana przez kadrę jest od razu przyznana." : "Punkty dla zastępu naliczają się po zatwierdzeniu przez kadrę."}
         Liczy się do kwartału, w którym złożono wniosek (teraz: <b>${esc(cq.nazwa)}</b>).${r === "zastepowy" ? " Jako zastępowy możesz złożyć wniosek także za harcerza ze swojego zastępu." : ""}</p></div>`;
@@ -710,7 +737,7 @@ binders.sprawnosci = () => {
   if (S.edit?.kind === "sprawnosc") return bindSprawEdit();
   if (S.view?.kind === "hist") return bindHist("sprawnosci");
   bindHistBtn();
-  const info = () => { const el = $("#sp_info"), v = S.spU || ""; if (!el) return; el.hidden = !v.startsWith("__caly:"); el.innerHTML = el.hidden ? "" : calyInfo(v.slice(7), S.spG || 1); };
+  const info = bindCaly("sp", () => (S.spU || "").startsWith("__caly:") ? { z: S.spU.slice(7), g: S.spG || 1, nazwa: calyName("sp") } : null);
   $$("[data-g]").forEach(b => b.onclick = () => { S.spG = +b.dataset.g; $$("[data-g]").forEach(x => x.classList.toggle("on", x === b)); info(); });
   $("#sp_u") && ($("#sp_u").onchange = e => { S.spU = e.target.value; info(); });
   $("#sp_add") && ($("#sp_add").onclick = () => addSpraw($("#sp_add")));
@@ -727,11 +754,13 @@ async function addSpraw(btn) {
   let who;
   if (sel?.startsWith("__caly:")) {                      // cały zastęp zdobył sprawność
     const z = sel.slice(7); if (!kadra && z !== S.profile.zastep) return alert("Możesz zgłosić tylko swój zastęp");
-    who = calyTarget(z); if (!who.uczestnicy.length) return alert(`W zastępie ${z} nie ma jeszcze kont harcerzy.`);
+    who = calyTarget(z, g, nazwa);
+    if (!who.uczestnicy.length && !who.mieli.length) return alert(`W zastępie ${z} nie ma jeszcze kont harcerzy.`);
+    if (!who.uczestnicy.length) return alert("Zaznacz, kto zdobył sprawność (nikt nie ma „✔ zdobył(a)”).");
     const dup = S.sprawnosci.find(s => s.caly && s.zastep === z && s.status !== "odrzucona" && Number(s.gwiazdki) === g && (s.nazwa || "").toLowerCase() === nazwa.toLowerCase());
     if (dup && !confirm(`Zastęp ${z} ma już ${dup.status === "przyznana" ? "przyznaną" : "zgłoszoną"} sprawność „${dup.nazwa}” ${gw(g)}. Dodać mimo to?`)) return;
     btn.disabled = true;
-    try { await addDoc(collection(db, "sprawnosci"), sprawDoc({ nazwa, g, data: today(), target: who })); const o = $("#sp_n"); if (o) o.value = ""; }
+    try { await addDoc(collection(db, "sprawnosci"), sprawDoc({ nazwa, g, data: today(), target: who })); S.cm = {}; S.cn = {}; const o = $("#sp_n"); if (o) o.value = ""; render(); }
     catch (e) { err(e.code === "permission-denied" ? "Brak uprawnień do zapisania sprawności (kadra musi wkleić nowe reguły w Firebase)." : e); }
     const b2 = $("#sp_add"); if (b2) b2.disabled = false; return;
   }
@@ -759,10 +788,11 @@ function vSprawEdit() {
    <label>Data wniosku<br><input type="date" id="se_d" value="${s.data || ""}"></label>
    <label>Status<br><select id="se_s">${["przyznana", "oczekuje", "odrzucona"].map(v => `<option value="${v}" ${s.status === v ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
    <p class="mut">Data wniosku decyduje, do którego kwartału liczą się punkty.</p>
-   ${s.caly ? (() => { const cand = [...(s.uczestnicy || [])]; czlonkowie(s.zastep).forEach(u => { if (!cand.some(x => x.uid === u.uid)) cand.push(u); });
-     const on = new Set((s.uczestnicy || []).map(u => u.uid));
-     return `<h3>👥 Uczestnicy — cały zastęp</h3><div class="chks">${cand.map(u => `<label class="chk"><input type="checkbox" data-uu="${u.uid}" data-ui="${esc(u.imie)}" ${on.has(u.uid) ? "checked" : ""}> ${esc(u.imie)}</label>`).join("")}</div>
-       <p class="mut">Punkty = liczba zaznaczonych × 2 × punkty za gwiazdki.</p>`; })() : ""}
+   ${s.caly ? (() => { const cand = [...(s.uczestnicy || []), ...(s.mieli || [])]; czlonkowie(s.zastep).forEach(u => { if (!cand.some(x => x.uid === u.uid)) cand.push(u); });
+     const st = uid => (s.uczestnicy || []).some(u => u.uid === uid) ? "z" : (s.mieli || []).some(u => u.uid === uid) ? "m" : "";
+     return `<h3>👥 Cały zastęp — kto zdobył</h3><div class="clist">${cand.map(u => `<div class="crow"><span>${esc(u.imie)}</span>
+       <select data-ue2="${u.uid}" data-ui="${esc(u.imie)}">${[["z", "✔ zdobył(a)"], ["m", "już ma (był(a))"], ["", "— nie liczy się"]].map(([v, l]) => `<option value="${v}" ${st(u.uid) === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>`).join("")}</div>
+       <p class="mut">Punkty = liczba osób „zdobył(a)” × 2 × punkty za gwiazdki.</p>`; })() : ""}
    <div class="row"><button class="pri" id="sesave">Zapisz</button><button id="secancel">Anuluj</button><button class="del" id="sedel">Usuń</button></div></div>`;
 }
 function bindSprawEdit() {
@@ -773,8 +803,9 @@ function bindSprawEdit() {
     if (nazwa.length < 2) return alert("Wpisz nazwę sprawności");
     if (!data) return alert("Wybierz datę");
     const upd = { nazwa, gwiazdki: Number($("#se_g").value), data, status, zmienil: S.user.uid, zmienilImie: myName() };
-    if (s.caly) { upd.uczestnicy = [...$$("[data-uu]")].filter(x => x.checked).map(x => ({ uid: x.dataset.uu, imie: x.dataset.ui }));
-      if (!upd.uczestnicy.length) return alert("Zaznacz co najmniej jedną osobę"); }
+    if (s.caly) { const pick = v => [...$$("[data-ue2]")].filter(x => x.value === v).map(x => ({ uid: x.dataset.ue2, imie: x.dataset.ui }));
+      upd.uczestnicy = pick("z"); upd.mieli = pick("m");
+      if (!upd.uczestnicy.length) return alert("Co najmniej jedna osoba musi mieć „✔ zdobył(a)”"); }
     if (status !== s.status && status !== "oczekuje") Object.assign(upd, { sprawdzil: S.user.uid, sprawdzilImie: myName(), sprawdzono: serverTimestamp() });
     try { await updateDoc(doc(db, "sprawnosci", S.edit.id), upd); doneEdit(); } catch (e) { err(e); }
   };
