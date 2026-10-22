@@ -2,12 +2,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   signOut, updatePassword, deleteUser, reauthenticateWithCredential, EmailAuthProvider }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, serverTimestamp }
+import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-083450";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-083450";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-103135";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-103135";
 
-const BUILD = "20261022-083450";
+const BUILD = "20261022-103135";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -262,7 +262,7 @@ function vAkcjaEdit() {
     <div class="scroll"><table>${head()}${numRow("Miejsce (remis = to samo)", z => g.miejsca?.[z], z => `gry.${i}.miejsca.${z}`, "–")}</table></div>`).join("");
   const mund = a.mundury.map((m, i) => `<h3><input data-p="mundury.${i}.nazwa" value="${esc(m.nazwa)}" placeholder="Sprawdzanie munduru ${i + 1}">
     <button class="del" data-rm="mundury.${i}">Usuń</button></h3><div class="scroll"><table>${head()}
-    ${numRow("Obecni przy sprawdzaniu", z => m.dane?.[z]?.h, z => `mundury.${i}.dane.${z}.h`)}
+    ${numRow("Obecni przy sprawdzaniu", z => m.dane?.[z]?.h, z => `mundury.${i}.dane.${z}.h`, z => a.wyniki?.[z]?.hob ?? "")}
     ${numRow("Liczba błędów", z => m.dane?.[z]?.b, z => `mundury.${i}.dane.${z}.b`)}</table></div>`).join("");
   return `<div class="card"><h2>${S.edit.id ? "Edycja akcji" : "Nowa zbiórka drużyny / biwak"}</h2>
    <div class="row"><select data-p="typ"><option value="zbiorka" ${a.typ === "zbiorka" ? "selected" : ""}>Zbiórka drużyny</option><option value="biwak" ${a.typ === "biwak" ? "selected" : ""}>Biwak</option></select>
@@ -272,12 +272,15 @@ function vAkcjaEdit() {
    ${numRow("Obecni (hob)", z => a.wyniki?.[z]?.hob, z => `wyniki.${z}.hob`)}</table></div>
    <p class="mut">Puste h = liczebność z ustawień.</p>
    <h3>Gry</h3>${gry}<div class="row"><button id="gAdd">+ Gra duża</button><button id="mAdd">+ Gra mała</button></div>
-   <h3>Umundurowanie</h3>${mund}<div class="row"><button id="uAdd">+ Sprawdzanie munduru</button></div>
+   <h3>Umundurowanie</h3><p class="mut">Liczba obecnych przy sprawdzaniu jest domyślnie taka jak obecnych na zbiórce (szara podpowiedź). Wpisz inną, jeśli się różni; wyczyść pole, żeby wrócić do domyślnej.</p>${mund}<div class="row"><button id="uAdd">+ Sprawdzanie munduru</button></div>
    <h3>Podgląd punktów</h3><div class="scroll" id="pv">${akcjaPreview()}</div>
    <div class="row"><button class="pri" id="save">Zapisz</button><button id="cancel">Anuluj</button>${S.edit.id ? `<button class="del" id="remove">Usuń akcję</button>` : ""}</div></div>`;
 }
 function bindAkcjaEdit() {
   bindEditor(akcjaPreview); const a = S.edit.d;
+  // zmiana obecnych na zbiórce od razu zmienia podpowiedź w sprawdzaniu munduru
+  ZASTEPY.forEach(z => { const el = document.querySelector(`[data-p="wyniki.${z}.hob"]`);
+    el && el.addEventListener("input", () => $$(`[data-p^="mundury."][data-p$=".dane.${z}.h"]`).forEach(x => x.placeholder = el.value)); });
   $("#gAdd").onclick = () => { a.gry.push({ nazwa: "", rodzaj: "duza", miejsca: {} }); render(); };
   $("#mAdd").onclick = () => { a.gry.push({ nazwa: "", rodzaj: "mala", miejsca: {} }); render(); };
   $("#uAdd").onclick = () => { a.mundury.push({ nazwa: "", dane: {} }); render(); };
@@ -302,6 +305,7 @@ function alarmState(al) {
 function vAlarmy() {
   if (S.edit?.kind === "alarm") return vAlarmEdit();
   if (S.view?.kind === "alarm") return vAlarmDetail();
+  if (S.view?.kind === "photos") return vPhotos();
   let my = "";
   if (canMeldowac()) {
     const mine = S.profile?.zastep;
@@ -328,7 +332,7 @@ function vAlarmy() {
     const pend = ms.filter(m => m.status === "oczekuje").length;
     return `<tr><td>${plDay(a.data)}${a.start ? `<div class="mut">${a.start}</div>` : ""}</td><td>${esc(a.nazwa)}</td>${ZASTEPY.map(z => `<td class="n">${frac(r[z].total)}${cnt(z) ? `<div class="mut">✔ ${cnt(z)}</div>` : ""}</td>`).join("")}
     <td class="act"><button data-v="${a.id}">Meldunki${pend && isKadra() ? ` <span class="badge w">${pend}</span>` : ""}</button>${isKadra() ? `<button data-e="${a.id}">Edytuj</button>` : ""}</td></tr>`; }).join("");
-  return my + `<div class="card"><h2>Alarmy</h2>${quarterPicker()}${isKadra() ? `<div class="row"><button class="pri" id="anew">+ Nowy alarm</button></div>` : ""}
+  return my + `<div class="card"><h2>Alarmy</h2>${quarterPicker()}${isKadra() ? `<div class="row"><button class="pri" id="anew">+ Nowy alarm</button><button id="photos">🖼 Zdjęcia z alarmów</button></div>` : ""}
     <div class="scroll"><table><tr><th>Data</th><th>Alarm</th>${ZASTEPY.map(z => `<th class="n">${z}</th>`).join("")}<th></th></tr>
     ${rows || `<tr><td colspan=9 class="mut">Brak alarmów w tym kwartale</td></tr>`}</table></div>
     <p class="mut">Punkty liczą tylko zaakceptowane meldunki. „✔ n” = liczba meldunków (także czekających na akceptację).</p></div>`;
@@ -336,6 +340,8 @@ function vAlarmy() {
 binders.alarmy = () => {
   if (S.edit?.kind === "alarm") return bindAlarmEdit();
   if (S.view?.kind === "alarm") return bindAlarmDetail();
+  if (S.view?.kind === "photos") return bindPhotos();
+  $("#photos") && ($("#photos").onclick = () => { S.view = { kind: "photos" }; render(); });
   $("#anew") && ($("#anew").onclick = () => { S.edit = { kind: "alarm", d: emptyAlarm() }; render(); });
   $$("[data-e]").forEach(b => b.onclick = () => {
     const a = S.alarmy.find(x => x.id === b.dataset.e); const d = structuredClone(a);
@@ -391,6 +397,66 @@ async function showPhoto(id) {
   $("#mclose").onclick = () => { m.hidden = true; m.innerHTML = ""; };
 }
 document.addEventListener("click", e => { const m = $("#modal"); if (e.target === m) { m.hidden = true; m.innerHTML = ""; } });
+
+// --- wszystkie zdjęcia z alarmów (kadra): podgląd i pobieranie
+const plural = (n, one, few, many) => n === 1 ? one : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? few : many;
+S.photoCache = {};
+const safe = t => String(t || "").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 60);
+const STAT_PL = { oczekuje: "oczekuje", zaakceptowany: "zaakceptowany", odrzucony: "odrzucony" };
+const photoName = (m) => `${safe(m.zastep)} - ${safe(m.imie)} - ${plTime(m.czasMs).replace(":", ".")} (${STAT_PL[m.status] || m.status}).jpg`;
+const alarmFolder = a => safe(`${a.data} ${a.nazwa || "Alarm"}`);
+async function loadPhotos(alarmId) {
+  if (S.photoCache[alarmId]) return S.photoCache[alarmId];
+  const snap = await getDocs(query(collection(db, "zdjecia"), where("alarmId", "==", alarmId)));
+  const ms = Object.fromEntries(meldOf({ id: alarmId }).map(m => [m.id, m]));
+  const list = snap.docs.map(d => ({ id: d.id, img: d.data().img, m: ms[d.id] || { imie: "?", zastep: "?", status: "usunięty", czasMs: null } }))
+    .sort((x, y) => (x.m.czasMs || 0) - (y.m.czasMs || 0));
+  return (S.photoCache[alarmId] = list);
+}
+let _jszip = null;
+const loadJSZip = () => _jszip || (_jszip = new Promise((res, rej) => { const sc = document.createElement("script");
+  sc.src = "vendor/jszip.min.js"; sc.onload = () => res(window.JSZip); sc.onerror = () => { _jszip = null; rej(new Error("Nie udało się wczytać modułu ZIP")); }; document.head.appendChild(sc); }));
+function saveBlob(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 10000); }
+async function zipAlarms(alarms, name, btn) {
+  const t = btn.textContent; btn.disabled = true; S.busy = true;
+  try {
+    const JSZip = await loadJSZip(); const zip = new JSZip(); let n = 0;
+    for (const a of alarms) { btn.textContent = `Pobieram… ${alarmFolder(a)}`;
+      const f = alarms.length > 1 ? zip.folder(alarmFolder(a)) : zip;
+      for (const p of await loadPhotos(a.id)) { f.file(photoName(p.m), p.img.split(",")[1], { base64: true }); n++; } }
+    if (!n) throw new Error("Brak zdjęć do pobrania");
+    btn.textContent = "Pakuję…";
+    saveBlob(await zip.generateAsync({ type: "blob" }), name);
+  } catch (e) { err(e); }
+  btn.disabled = false; btn.textContent = t; S.busy = false; render();
+}
+function vPhotos() {
+  if (!isKadra()) { S.view = null; return vAlarmy(); }
+  const list = S.alarmy.filter(a => inQ(a.data)).sort((x, y) => (y.startMs || 0) - (x.startMs || 0));
+  const cards = list.map(a => { const ms = meldOf(a), ph = S.photoCache[a.id];
+    return `<div class="card"><h3 style="margin-top:0">${esc(a.nazwa) || "Alarm"} <span class="mut">${plDay(a.data)}${a.start ? ", " + a.start : ""}</span></h3>
+      <div class="row"><span class="badge">${ms.length} ${plural(ms.length, "meldunek", "meldunki", "meldunków")}</span>
+      ${ph ? "" : `<button data-load="${a.id}">Pokaż zdjęcia</button>`}<button data-zip="${a.id}">⬇ Pobierz ZIP</button></div>
+      ${ph ? (ph.length ? `<div class="grid">${ph.map(p => `<figure data-big="${a.id}|${p.id}"><img src="${p.img}" alt="" loading="lazy">
+        <figcaption><b>${esc(p.m.imie)}</b> · ${esc(p.m.zastep)}<br>${plTime(p.m.czasMs)} · <span class="badge ${MSTAT[p.m.status]?.[0] || ""}">${esc(STAT_PL[p.m.status] || p.m.status)}</span></figcaption></figure>`).join("")}</div>`
+        : `<p class="mut">Brak zdjęć.</p>`) : ""}</div>`; }).join("");
+  return `<div class="card"><div class="row"><button id="back">← Alarmy</button></div><h2>🖼 Zdjęcia z alarmów</h2>${quarterPicker()}
+    <div class="row"><button class="pri" id="zipall" ${list.length ? "" : "disabled"}>⬇ Pobierz wszystkie z kwartału (ZIP)</button></div>
+    <p class="mut">W paczce ZIP każdy alarm ma osobny folder, a pliki nazywają się: zastęp – imię i nazwisko – godzina (status).</p></div>
+    ${cards || `<div class="card"><p class="mut">Brak alarmów w tym kwartale.</p></div>`}`;
+}
+function bindPhotos() {
+  $("#back").onclick = () => { S.view = null; render(); };
+  $$("[data-load]").forEach(b => b.onclick = async () => { b.disabled = true; b.textContent = "Ładuję…"; try { await loadPhotos(b.dataset.load); } catch (e) { err(e); } render(); });
+  $$("[data-zip]").forEach(b => b.onclick = () => { const a = S.alarmy.find(x => x.id === b.dataset.zip); zipAlarms([a], `zdjecia ${alarmFolder(a)}.zip`, b); });
+  $("#zipall") && ($("#zipall").onclick = () => zipAlarms(S.alarmy.filter(a => inQ(a.data)), `zdjecia ${safe(quarter().nazwa)}.zip`, $("#zipall")));
+  $$("[data-big]").forEach(f => f.onclick = () => { const [aid, pid] = f.dataset.big.split("|"); const p = S.photoCache[aid].find(x => x.id === pid);
+    const m = $("#modal"); m.hidden = false;
+    m.innerHTML = `<div class="box"><img src="${p.img}" alt=""><div class="mut">${esc(p.m.imie)} · ${esc(p.m.zastep)} · ${plTime(p.m.czasMs)}</div>
+      <div class="row"><a class="btn pri" href="${p.img}" download="${esc(photoName(p.m))}">⬇ Pobierz</a><button id="mclose">Zamknij</button></div></div>`;
+    $("#mclose").onclick = () => { m.hidden = true; m.innerHTML = ""; }; });
+}
 
 // --- szczegóły alarmu (meldunki)
 function vAlarmDetail() {

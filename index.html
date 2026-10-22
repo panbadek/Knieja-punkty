@@ -36,6 +36,11 @@ img.ph{max-width:100%;max-height:50vh;border-radius:10px;border:1px solid var(--
 #modal[hidden]{display:none}#modal .box{background:var(--card);border-radius:12px;padding:12px;max-width:100%;max-height:100%;overflow:auto;display:grid;gap:10px}
 #modal img{max-width:100%;max-height:75vh;border-radius:8px}
 details summary{cursor:pointer;padding:6px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-top:10px}
+.grid figure{margin:0;cursor:pointer;background:var(--acc2);border-radius:10px;overflow:hidden}
+.grid img{width:100%;aspect-ratio:1;object-fit:cover;display:block}.grid figcaption{padding:6px 8px;font-size:12px}
+a.btn{display:inline-block;text-decoration:none;font:inherit;border:1px solid var(--line);border-radius:8px;padding:7px 12px;background:var(--acc2);color:var(--ink)}
+a.btn.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
 #upd{background:#e9b949;color:#2b2000;padding:10px 16px;font-weight:600;cursor:pointer;text-align:center}#upd[hidden]{display:none}
 footer#ver{text-align:center;padding:8px 16px 24px;font-size:12px}
 .row[hidden]{display:none}
@@ -55,5 +60,5 @@ label.sw input:disabled+span{opacity:.5}
 <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
 <input type="file" id="galleryInput" accept="image/*" hidden>
 <div id="modal" hidden></div>
-<script type="module" src="app.js?v=20261022-083450"></script>
+<script type="module" src="app.js?v=20261022-103135"></script>
 </body></html>

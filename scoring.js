@@ -59,7 +59,8 @@ export function akcjaPoints(cfg, a) {
     }
     let mund = 0;
     for (const m of a.mundury || []) {
-      const d = m.dane?.[z]; const hm = Number(d?.h || 0);
+      // obecni przy sprawdzaniu: domyślnie = obecni na zbiórce (hob), chyba że wpisano inaczej
+      const d = m.dane?.[z] || {}; const hm = (d.h === null || d.h === undefined || d.h === "") ? hob : Number(d.h);
       if (hm > 0) mund += (cfg.mundur * hm - Number(d.b || 0)) / hm;
     }
     const gryPrzel = h > 0 ? gry * hob / h : 0;
