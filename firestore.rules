@@ -11,12 +11,14 @@ service cloud.firestore {
     function szeregowy() { return hasProfile() && me().rola == 'szeregowy'; }
     function mojZastep() { return me().zastep in ['Lisy', 'Łosie', 'Żubry', 'Rysie', 'Niedźwiedzie', 'Gronostaje']; }
     function alarm(id) { return get(/databases/$(db)/documents/alarmy/$(id)).data; }
+    function aktywny(aid) { return request.time.toMillis() >= alarm(aid).startMs && request.time.toMillis() < alarm(aid).startMs + 86400000; }
+    function zMojegoZastepu(uid) { return get(/databases/$(db)/documents/users/$(uid)).data.zastep == me().zastep; }
 
     match /config/{d} { allow read: if true; allow write: if kadra(); }
 
     // Konta: tylko administrator tworzy, zmienia i usuwa
     match /users/{uid} {
-      allow read: if signed() && (request.auth.uid == uid || kadra());
+      allow read: if signed() && (request.auth.uid == uid || kadra() || (zastepowy() && resource.data.zastep == me().zastep));
       allow create: if admin();
       // własnej funkcji i uprawnień administratora nie można sobie zmienić — robi to inny administrator
       allow update: if (admin() && (uid != request.auth.uid ||
@@ -54,23 +56,26 @@ service cloud.firestore {
 
     match /meldunki/{id} {
       allow read: if true;
-      allow create: if (szeregowy() || zastepowy()) && mojZastep()
-        && id == request.resource.data.alarmId + '_' + request.auth.uid
-        && request.resource.data.uid == request.auth.uid
+      // własny meldunek albo (zastępowy) za harcerza ze swojego zastępu
+      allow create: if mojZastep()
+        && id == request.resource.data.alarmId + '_' + request.resource.data.uid
         && request.resource.data.zastep == me().zastep
         && request.resource.data.status == 'oczekuje'
         && request.resource.data.czas == request.time
-        && request.time.toMillis() >= alarm(request.resource.data.alarmId).startMs
-        && request.time.toMillis() < alarm(request.resource.data.alarmId).startMs + 86400000;
+        && aktywny(request.resource.data.alarmId)
+        && (((szeregowy() || zastepowy()) && request.resource.data.uid == request.auth.uid)
+          || (zastepowy() && request.resource.data.zglosil == request.auth.uid && zMojegoZastepu(request.resource.data.uid)));
       allow update: if kadra();
-      allow delete: if kadra() || (signed() && resource.data.uid == request.auth.uid && resource.data.status == 'oczekuje');
+      allow delete: if kadra() || (signed() && resource.data.status == 'oczekuje'
+        && (resource.data.uid == request.auth.uid || resource.data.get('zglosil', '') == request.auth.uid));
     }
 
     match /zdjecia/{id} {
-      allow read: if kadra() || (signed() && resource.data.uid == request.auth.uid);
-      allow create, update: if signed() && request.resource.data.uid == request.auth.uid
-        && id == request.resource.data.alarmId + '_' + request.auth.uid;
-      allow delete: if kadra() || (signed() && resource.data.uid == request.auth.uid);
+      allow read: if kadra() || (signed() && (resource.data.uid == request.auth.uid || resource.data.get('zglosil', '') == request.auth.uid));
+      allow create, update: if signed() && id == request.resource.data.alarmId + '_' + request.resource.data.uid
+        && (request.resource.data.uid == request.auth.uid
+          || (zastepowy() && request.resource.data.zglosil == request.auth.uid && zMojegoZastepu(request.resource.data.uid)));
+      allow delete: if kadra() || (signed() && (resource.data.uid == request.auth.uid || resource.data.get('zglosil', '') == request.auth.uid));
     }
   }
 }

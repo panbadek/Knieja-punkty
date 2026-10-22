@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-205117";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts } from "./scoring.js?v=20261022-205117";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-211718";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts } from "./scoring.js?v=20261022-211718";
 
-const BUILD = "20261022-205117";
+const BUILD = "20261022-211718";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -60,9 +60,9 @@ const live = (name, key, map = x => x) => onSnapshot(collection(db, name), s => 
 live("zbiorkiZastepu", "zbiorki"); live("akcje", "akcje"); live("alarmy", "alarmy");
 live("korekty", "korekty");
 live("meldunki", "meldunki", m => ({ ...m, czasMs: m.czas?.toMillis ? m.czas.toMillis() : (m.czas == null ? Date.now() : Number(m.czas)) }));
-let usersUnsub = null, profUnsub = null, secretsUnsub = null, archUnsub = null;
+let usersUnsub = null, profUnsub = null, secretsUnsub = null, archUnsub = null, zUnsub = null;
 onAuthStateChanged(auth, async u => {
-  S.user = u; S.profile = null; S.secrets = {}; S.edit = null; S.view = null; S.photo = null; S.busy = false; usersUnsub?.(); usersUnsub = null; archUnsub?.(); archUnsub = null; S.archiwum = []; S.loaded.archiwum = false; profUnsub?.(); profUnsub = null; secretsUnsub?.(); secretsUnsub = null;
+  S.user = u; S.profile = null; S.zUsersOf = null; S.secrets = {}; S.edit = null; S.view = null; S.photo = null; S.busy = false; usersUnsub?.(); usersUnsub = null; zUnsub?.(); zUnsub = null; S.zUsers = []; archUnsub?.(); archUnsub = null; S.archiwum = []; S.loaded.archiwum = false; profUnsub?.(); profUnsub = null; secretsUnsub?.(); secretsUnsub = null;
   if (u) {
     const ref = doc(db, "users", u.uid);
     profUnsub = onSnapshot(ref, d => { S.profile = d.data() || null; S.profErr = null;
@@ -71,6 +71,11 @@ onAuthStateChanged(auth, async u => {
       S.typedLogin = null;
       if (isAdmin() && !secretsUnsub) secretsUnsub = onSnapshot(collection(db, "sekrety"), s => { S.secrets = Object.fromEntries(s.docs.map(d => [d.id, d.data().haslo])); refresh(); }, () => {});
       if (isKadra() && !usersUnsub) usersUnsub = onSnapshot(collection(db, "users"), s => { S.users = s.docs.map(d => ({ id: d.id, ...d.data() })); refresh(); });
+      if (rola() === "zastepowy" && ZASTEPY.includes(S.profile?.zastep) && S.zUsersOf !== S.profile.zastep) {   // harcerze własnego zastępu
+        zUnsub?.(); S.zUsersOf = S.profile.zastep;
+        zUnsub = onSnapshot(query(collection(db, "users"), where("zastep", "==", S.profile.zastep)),
+          s => { S.zUsers = s.docs.map(d => ({ id: d.id, ...d.data() })); refresh(); }, e => console.warn("zastęp", e));
+      }
       if (isKadra() && !archUnsub) archUnsub = onSnapshot(collection(db, "archiwum"), s => {
         S.archiwum = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.start || "").localeCompare(a.start || "")); S.loaded.archiwum = true; autoArchive(); refresh(); }, e => console.warn("archiwum", e));
       refresh(); }, e => { S.profErr = e.code || String(e); render(); });
@@ -343,21 +348,35 @@ function vAlarmy() {
   if (canMeldowac()) {
     const mine = S.profile?.zastep;
     const items = S.alarmy.filter(a => alarmState(a) !== "po" || myMeld(a)).filter(a => inQ(a.data)).map(a => {
-      const m = myMeld(a), st = alarmState(a);
+      const m = myMeld(a), st = alarmState(a), P = S.photo?.alarmId === a.id ? S.photo : null;
+      const status = x => `<span class="badge ${MSTAT[x.status]?.[0]}">${MSTAT[x.status]?.[1] || x.status}</span> <span class="mut">zgłoszono ${plTime(x.czasMs)}${x.zglosil && x.zglosil !== S.user.uid ? ` · zgłosił(a) ${esc(x.zglosilImie || "zastępowy")}` : ""}${x.status !== "oczekuje" && (x.sprawdzilImie || x.sprawdzil) ? ` · ${x.status === "odrzucony" ? "odrzucił" : "zaakceptował"}: ${esc(kto(x.sprawdzilImie, x.sprawdzil))}` : ""}</span>`;
       let body;
-      if (m) body = `<span class="badge ${MSTAT[m.status]?.[0]}">${MSTAT[m.status]?.[1] || m.status}</span> <span class="mut">zgłoszono ${plTime(m.czasMs)}${m.status !== "oczekuje" && (m.sprawdzilImie || m.sprawdzil) ? ` · ${m.status === "odrzucony" ? "odrzucił" : "zaakceptował"}: ${esc(kto(m.sprawdzilImie, m.sprawdzil))}` : ""}</span>
-        ${m.status === "oczekuje" ? `<button class="del" data-undo="${m.id}">Cofnij</button>` : ""}`;
-      else if (!ZASTEPY.includes(mine)) body = `<span class="err">Nie masz przypisanego zastępu — poproś kadrę.</span>`;
-      else if (st === "przed") body = `<span class="mut">Start: ${plTs(a.startMs)}</span>`;
-      else if (st === "trwa" && S.photo?.alarmId === a.id) body = `<img class="ph" src="${S.photo.data}" alt="zdjęcie">
-        <div class="row"><button class="pri" data-send="${a.id}">📨 Wyślij meldunek</button><button data-retake="${a.id}">📸 Inne zdjęcie</button><button data-gal="${a.id}">🖼 Z galerii</button><button data-cancelph>Anuluj</button></div>`;
-      else if (st === "trwa") body = `<div class="row"><button class="pri big" data-meld="${a.id}">📸 Zrób zdjęcie i zamelduj</button></div>
-        <div class="row"><button class="big" data-gal="${a.id}">🖼 Wybierz zdjęcie z galerii</button></div>`;
-      else body = `<span class="mut">Alarm zakończony</span>`;
+      if (P && st === "trwa") body = `${P.za ? `<p>Meldunek za: <b>${esc(P.za.imie)}</b></p>` : ""}<img class="ph" src="${P.data}" alt="zdjęcie">
+        <div class="row"><button class="pri" data-send="${a.id}">📨 Wyślij meldunek${P.za ? " za " + esc(P.za.imie.split(" ")[0]) : ""}</button><button data-retake="${a.id}">📸 Inne zdjęcie</button><button data-gal="${a.id}" data-keep="1">🖼 Z galerii</button><button data-cancelph>Anuluj</button></div>`;
+      else {
+        if (m) body = `${status(m)} ${m.status === "oczekuje" && (m.uid === S.user.uid && (!m.zglosil || m.zglosil === S.user.uid)) ? `<button class="del" data-undo="${m.id}">Cofnij</button>` : ""}`;
+        else if (!ZASTEPY.includes(mine)) body = `<span class="err">Nie masz przypisanego zastępu — poproś kadrę.</span>`;
+        else if (st === "przed") body = `<span class="mut">Start: ${plTs(a.startMs)}</span>`;
+        else if (st === "trwa") body = `<div class="row"><button class="pri big" data-meld="${a.id}">📸 Zrób zdjęcie i zamelduj</button></div>
+          <div class="row"><button class="big" data-gal="${a.id}">🖼 Wybierz zdjęcie z galerii</button></div>`;
+        else body = `<span class="mut">Alarm zakończony</span>`;
+        // zastępowy: meldowanie za harcerzy swojego zastępu
+        if (rola() === "zastepowy" && ZASTEPY.includes(mine) && st !== "przed") {
+          const ms = meldOf(a), done = new Set(ms.map(x => x.uid));
+          const mojeZa = ms.filter(x => x.zglosil === S.user.uid && x.uid !== S.user.uid);
+          const kand = (S.zUsers || []).filter(u => u.id !== S.user.uid && !done.has(u.id) && u.zastep === mine)
+            .sort((x, y) => (x.imie || "").localeCompare(y.imie || "", "pl"));
+          body += `<div class="za"><b>👥 Za harcerzy z zastępu</b>
+            ${mojeZa.map(x => `<div class="row">${esc(x.imie)} — ${status(x)} ${x.status === "oczekuje" ? `<button class="del" data-undo="${x.id}">Cofnij</button>` : ""}</div>`).join("")}
+            ${st === "trwa" ? (kand.length ? `<div class="row"><select id="za_${a.id}"><option value="">– wybierz harcerza –</option>${kand.map(u => `<option value="${u.id}">${esc(u.imie)}</option>`).join("")}</select></div>
+              <div class="row"><button data-zcam="${a.id}">📸 Zdjęcie</button><button data-zgal="${a.id}">🖼 Z galerii</button></div>`
+              : `<p class="mut">Wszyscy z Twojego zastępu mają już meldunek.</p>`) : ""}</div>`;
+        }
+      }
       return `<div class="it2"><div><b>${esc(a.nazwa) || "Alarm"}</b> <span class="mut">${plDay(a.data)}${a.start ? ", start " + a.start : ""}</span></div>${body}</div>`;
     }).join("");
     my = `<div class="card"><h2>📣 Meldowanie alarmów</h2>${items || `<p class="mut">Brak trwających alarmów.</p>`}
-      <p class="mut">Po wykonaniu alarmu zrób zdjęcie (albo wybierz je z galerii) i wyślij meldunek. Liczy się godzina wysłania. Punkty naliczają się po akceptacji przez kadrę.</p></div>`;
+      <p class="mut">Po wykonaniu alarmu zrób zdjęcie (albo wybierz je z galerii) i wyślij meldunek. Liczy się godzina wysłania. Punkty naliczają się po akceptacji przez kadrę.${rola() === "zastepowy" ? " Jako zastępowy możesz też zameldować harcerza ze swojego zastępu, który nie ma telefonu." : ""}</p></div>`;
   }
   const list = S.alarmy.filter(a => inQ(a.data));
   const rows = list.map(a => { const r = alarmPoints(S.cfg, a, S.meldunki), ms = meldOf(a);
@@ -382,8 +401,12 @@ binders.alarmy = () => {
     const a = S.alarmy.find(x => x.id === b.dataset.e); const d = structuredClone(a);
     d.progiMin = alarmProgiMin(S.cfg, a); S.edit = { kind: "alarm", id: a.id, d }; render(); });
   $$("[data-v]").forEach(b => b.onclick = () => { S.view = { kind: "alarm", id: b.dataset.v }; render(); });
-  $$("[data-meld],[data-retake]").forEach(b => b.onclick = () => pickPhoto(b.dataset.meld || b.dataset.retake, false));
-  $$("[data-gal]").forEach(b => b.onclick = () => pickPhoto(b.dataset.gal, true));
+  $$("[data-meld]").forEach(b => b.onclick = () => pickPhoto(b.dataset.meld, false));
+  $$("[data-retake]").forEach(b => b.onclick = () => pickPhoto(b.dataset.retake, false, S.photo?.za));
+  $$("[data-gal]").forEach(b => b.onclick = () => pickPhoto(b.dataset.gal, true, b.dataset.keep ? S.photo?.za : null));
+  const zaWho = aid => { const sel = $("#za_" + aid), u = (S.zUsers || []).find(x => x.id === sel?.value); if (!u) alert("Wybierz harcerza z listy"); return u ? { uid: u.id, imie: u.imie || loginOfUser(u) } : null; };
+  $$("[data-zcam]").forEach(b => b.onclick = () => { const za = zaWho(b.dataset.zcam); if (za) pickPhoto(b.dataset.zcam, false, za); });
+  $$("[data-zgal]").forEach(b => b.onclick = () => { const za = zaWho(b.dataset.zgal); if (za) pickPhoto(b.dataset.zgal, true, za); });
   $$("[data-cancelph]").forEach(b => b.onclick = () => { S.photo = null; render(); });
   $$("[data-send]").forEach(b => b.onclick = () => sendMeld(b.dataset.send, b));
   $$("[data-undo]").forEach(b => b.onclick = () => confirm("Cofnąć meldunek? Przy ponownym meldunku liczy się nowa godzina.") &&
@@ -391,12 +414,12 @@ binders.alarmy = () => {
 };
 
 // --- zdjęcie i meldunek
-function pickPhoto(alarmId, gallery) {
+function pickPhoto(alarmId, gallery, za = null) {
   const inp = $(gallery ? "#galleryInput" : "#photoInput"); inp.value = "";
   inp.onchange = async () => {
     const f = inp.files?.[0]; if (!f) return;
     S.busy = true;
-    try { S.photo = { alarmId, data: await compressImage(f) }; } catch (e) { err("Nie udało się wczytać zdjęcia"); }
+    try { S.photo = { alarmId, data: await compressImage(f), za }; } catch (e) { err("Nie udało się wczytać zdjęcia"); }
     S.busy = false; render();
   };
   inp.click();
@@ -415,11 +438,12 @@ async function compressImage(file, max = 1280) {
 async function sendMeld(alarmId, btn) {
   if (!S.photo || S.photo.alarmId !== alarmId) return alert("Najpierw zrób zdjęcie");
   btn.disabled = true; btn.textContent = "Wysyłam…"; S.busy = true;
-  const id = `${alarmId}_${S.user.uid}`;
+  const za = S.photo.za, uid = za ? za.uid : S.user.uid, id = `${alarmId}_${uid}`;
+  const zgl = za ? { zglosil: S.user.uid, zglosilImie: myName() } : {};
   try {
-    await setDoc(doc(db, "zdjecia", id), { uid: S.user.uid, alarmId, img: S.photo.data });
-    await setDoc(doc(db, "meldunki", id), { alarmId, uid: S.user.uid, imie: S.profile?.imie || loginOf(S.user.email),
-      zastep: S.profile.zastep, status: "oczekuje", czas: serverTimestamp() });
+    await setDoc(doc(db, "zdjecia", id), { uid, alarmId, img: S.photo.data, ...zgl });
+    await setDoc(doc(db, "meldunki", id), { alarmId, uid, imie: za ? za.imie : myName(),
+      zastep: S.profile.zastep, status: "oczekuje", czas: serverTimestamp(), ...zgl });
     S.photo = null;
   } catch (e) { err(e.code === "permission-denied" ? "Nie można teraz zameldować (alarm się nie zaczął, już się skończył albo nie masz roli)." : e); }
   S.busy = false; render();
@@ -502,7 +526,7 @@ function vAlarmDetail() {
   const a = S.alarmy.find(x => x.id === S.view.id); if (!a) { S.view = null; return vAlarmy(); }
   const r = alarmPoints(S.cfg, a, S.meldunki), ms = meldOf(a).sort((x, y) => x.czasMs - y.czasMs), labels = progLabels(alarmProgiMin(S.cfg, a));
   const row = (m, who) => { const min = meldMinute(a, m), pi = min == null ? null : progIndex(S.cfg, a, min);
-    return `<tr><td>${plTime(m.czasMs)}<div class="mut">${min == null ? "" : Math.floor(min) + " min"}</div></td><td>${esc(m.imie)}</td><td>${esc(m.zastep)}</td>
+    return `<tr><td>${plTime(m.czasMs)}<div class="mut">${min == null ? "" : Math.floor(min) + " min"}</div></td><td>${esc(m.imie)}${m.zglosil && m.zglosil !== m.uid ? `<div class="mut">zgłosił(a) ${esc(m.zglosilImie || "zastępowy")}</div>` : ""}</td><td>${esc(m.zastep)}</td>
     <td>${pi == null ? "–" : `${pi + 1}. próg<div class="mut">${S.cfg.alarmProgi[pi] ?? 0} pkt</div>`}</td>
     ${who ? `<td>${ktoKiedy(m.sprawdzilImie, m.sprawdzil, m.sprawdzono)}</td>` : ""}<td class="act">${isKadra() || m.uid === S.user?.uid ? `<button data-ph="${m.id}">📷</button>` : ""}
     ${isKadra() && m.status !== "zaakceptowany" ? `<button data-acc="${m.id}">✔ Akceptuj</button>` : ""}
