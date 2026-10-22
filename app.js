@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-172354";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-172354";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-173107";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-173107";
 
-const BUILD = "20261022-172354";
+const BUILD = "20261022-173107";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -944,9 +944,26 @@ function archHtml(a) {
 }
 
 // ---------- USTAWIENIA (kadra)
+const APP_URL = "https://panbadek.github.io/Knieja-punkty/";
+const APK_URL = "https://github.com/panbadek/Knieja-punkty/releases/latest/download/Kniejapunkty.apk";
+const linkRow = (id, url) => `<div class="row"><input id="${id}" value="${url}" readonly style="flex:1;min-width:0" onfocus="this.select()">
+  <button class="pri" data-copy="${id}">📋 Kopiuj</button>${navigator.share ? `<button data-share="${id}">📤 Udostępnij</button>` : ""}</div>`;
+async function copyText(text, btn) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+    const t = document.createElement("textarea"); t.value = text; t.style.position = "fixed"; t.style.opacity = "0"; document.body.appendChild(t);
+    t.select(); try { ok = document.execCommand("copy"); } catch (e2) {} t.remove(); }
+  const old = btn.textContent; btn.textContent = ok ? "✔ Skopiowano" : "Zaznacz i skopiuj ręcznie"; setTimeout(() => btn.textContent = old, 2000);
+}
 function vUstawienia() {
   const c = S.cfg, list = (k, n) => `<input data-c="${k}" value="${(c[k] || []).join(", ")}" style="width:100%" title="${n}">`;
-  return `<div class="card"><h2>Ustawienia punktacji</h2>
+  return `<div class="card"><h2>🔗 Link do aplikacji</h2>
+   <p class="mut">Wyślij go szeregowym, zastępowym i kadrze. Działa na każdym telefonie i komputerze.</p>
+   ${linkRow("lnk_web", APP_URL)}
+   <h3>Aplikacja na Androida (APK)</h3>
+   ${linkRow("lnk_apk", APK_URL)}
+   <p class="mut">Po pobraniu pliku trzeba zezwolić na instalację z tego źródła.</p></div>
+   <div class="card"><h2>Ustawienia punktacji</h2>
    <div class="row">Pkt bazowe za zbiórkę zastępu <input type="number" data-c="base" value="${c.base}"></div>
    <div class="row">Przyrost streaka <input type="number" step="0.05" data-c="step" value="${c.step}"></div>
    <div class="row">Pkt za mundur na osobę <input type="number" data-c="mundur" value="${c.mundur}"></div>
@@ -961,6 +978,8 @@ function vUstawienia() {
    <p class="mut">Zmiana ustawień przelicza wszystkie wyniki od nowa. Streak zeruje się na początku każdego kwartału.</p></div>`;
 }
 binders.ustawienia = () => {
+  $$("[data-copy]").forEach(b => b.onclick = () => copyText($("#" + b.dataset.copy).value, b));
+  $$("[data-share]").forEach(b => b.onclick = () => navigator.share({ title: "Kniejapunkty", text: "Punktacja zastępów", url: $("#" + b.dataset.share).value }).catch(() => {}));
   const c = structuredClone(S.cfg);
   const read = () => {
     $$("[data-c]").forEach(el => { const k = el.dataset.c;
