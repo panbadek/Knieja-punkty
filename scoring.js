@@ -123,6 +123,9 @@ export function quarterTotals(cfg, q, data, todayStr) {
   for (const al of data.alarmy.filter(a => inQ(a.data, q))) {
     const r = alarmPoints(cfg, al, data.meldunki || []); for (const z of ZASTEPY) t[z].alarmy += r[z].total;
   }
+  // ręczne korekty kadry (+/−) doliczane do swojej kategorii
+  for (const k of (data.korekty || []).filter(k => inQ(k.data, q)))
+    if (t[k.zastep] && ["zbiorki", "akcje", "alarmy"].includes(k.kategoria)) t[k.zastep][k.kategoria] += Number(k.pkt) || 0;
   for (const z of ZASTEPY) t[z].suma = t[z].zbiorki + t[z].akcje + t[z].alarmy;
   return t;
 }

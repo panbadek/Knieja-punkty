@@ -43,6 +43,7 @@ service cloud.firestore {
     }
 
     match /akcje/{id}  { allow read: if true; allow write: if kadra(); }
+    match /korekty/{id} { allow read: if true; allow write: if kadra(); }
     match /alarmy/{id} { allow read: if true; allow write: if kadra(); }
 
     match /meldunki/{id} {
