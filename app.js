@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-074649";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-074649";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-083450";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac } from "./scoring.js?v=20261022-083450";
 
-const BUILD = "20261022-074649";
+const BUILD = "20261022-083450";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -97,7 +97,7 @@ function bindQuarter() { $("#qsel") && ($("#qsel").onchange = e => { S.q = +e.ta
 function render() {
   renderChrome(); const ver = $("#ver");
   if (ver) ver.textContent = "wersja " + BUILD + (S.user ? ` · konto ${S.user.uid.slice(0, 6)} · ` + (S.profErr ? `błąd profilu: ${S.profErr}`
-    : !S.profile ? "brak profilu" : `rola: ${S.profile.rola} · admin: ${S.profile.admin === true ? "tak" : S.profile.admin === undefined ? "brak pola" : JSON.stringify(S.profile.admin)}`) : "") + (S.diag ? " · " + S.diag : "");
+    : !S.profile ? "brak profilu" : `rola: ${S.profile.rola}` + (["kadra", "admin"].includes(S.profile.rola) ? ` · admin: ${S.profile.admin === true ? "tak" : S.profile.admin === undefined ? "brak pola" : JSON.stringify(S.profile.admin)}` : "")) : "") + (S.diag ? " · " + S.diag : "");
   const views = { wyniki: vWyniki, zbiorki: vZbiorki, akcje: vAkcje, alarmy: vAlarmy, ustawienia: vUstawienia, uzytkownicy: vUsers, login: vLogin };
   $("#main").innerHTML = (views[S.tab] || vWyniki)();
   bindQuarter(); (binders[S.tab] || (() => {}))();
@@ -313,13 +313,14 @@ function vAlarmy() {
       else if (!ZASTEPY.includes(mine)) body = `<span class="err">Nie masz przypisanego zastępu — poproś kadrę.</span>`;
       else if (st === "przed") body = `<span class="mut">Start: ${plTs(a.startMs)}</span>`;
       else if (st === "trwa" && S.photo?.alarmId === a.id) body = `<img class="ph" src="${S.photo.data}" alt="zdjęcie">
-        <div class="row"><button class="pri" data-send="${a.id}">📨 Wyślij meldunek</button><button data-retake="${a.id}">Zrób inne zdjęcie</button><button data-cancelph>Anuluj</button></div>`;
-      else if (st === "trwa") body = `<button class="pri big" data-meld="${a.id}">📸 Zamelduj wykonanie</button>`;
+        <div class="row"><button class="pri" data-send="${a.id}">📨 Wyślij meldunek</button><button data-retake="${a.id}">📸 Inne zdjęcie</button><button data-gal="${a.id}">🖼 Z galerii</button><button data-cancelph>Anuluj</button></div>`;
+      else if (st === "trwa") body = `<div class="row"><button class="pri big" data-meld="${a.id}">📸 Zrób zdjęcie i zamelduj</button></div>
+        <div class="row"><button class="big" data-gal="${a.id}">🖼 Wybierz zdjęcie z galerii</button></div>`;
       else body = `<span class="mut">Alarm zakończony</span>`;
       return `<div class="it2"><div><b>${esc(a.nazwa) || "Alarm"}</b> <span class="mut">${plDay(a.data)}${a.start ? ", start " + a.start : ""}</span></div>${body}</div>`;
     }).join("");
     my = `<div class="card"><h2>📣 Meldowanie alarmów</h2>${items || `<p class="mut">Brak trwających alarmów.</p>`}
-      <p class="mut">Po wykonaniu alarmu zrób zdjęcie i wyślij meldunek. Liczy się godzina wysłania. Punkty naliczają się po akceptacji przez kadrę.</p></div>`;
+      <p class="mut">Po wykonaniu alarmu zrób zdjęcie (albo wybierz je z galerii) i wyślij meldunek. Liczy się godzina wysłania. Punkty naliczają się po akceptacji przez kadrę.</p></div>`;
   }
   const list = S.alarmy.filter(a => inQ(a.data));
   const rows = list.map(a => { const r = alarmPoints(S.cfg, a, S.meldunki), ms = meldOf(a);
@@ -340,7 +341,8 @@ binders.alarmy = () => {
     const a = S.alarmy.find(x => x.id === b.dataset.e); const d = structuredClone(a);
     d.progiMin = alarmProgiMin(S.cfg, a); S.edit = { kind: "alarm", id: a.id, d }; render(); });
   $$("[data-v]").forEach(b => b.onclick = () => { S.view = { kind: "alarm", id: b.dataset.v }; render(); });
-  $$("[data-meld],[data-retake]").forEach(b => b.onclick = () => pickPhoto(b.dataset.meld || b.dataset.retake));
+  $$("[data-meld],[data-retake]").forEach(b => b.onclick = () => pickPhoto(b.dataset.meld || b.dataset.retake, false));
+  $$("[data-gal]").forEach(b => b.onclick = () => pickPhoto(b.dataset.gal, true));
   $$("[data-cancelph]").forEach(b => b.onclick = () => { S.photo = null; render(); });
   $$("[data-send]").forEach(b => b.onclick = () => sendMeld(b.dataset.send, b));
   $$("[data-undo]").forEach(b => b.onclick = () => confirm("Cofnąć meldunek? Przy ponownym meldunku liczy się nowa godzina.") &&
@@ -348,8 +350,8 @@ binders.alarmy = () => {
 };
 
 // --- zdjęcie i meldunek
-function pickPhoto(alarmId) {
-  const inp = $("#photoInput"); inp.value = "";
+function pickPhoto(alarmId, gallery) {
+  const inp = $(gallery ? "#galleryInput" : "#photoInput"); inp.value = "";
   inp.onchange = async () => {
     const f = inp.files?.[0]; if (!f) return;
     S.busy = true;
