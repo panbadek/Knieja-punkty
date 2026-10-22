@@ -1,0 +1,35 @@
+# Buduje aplikację Android (APK) i publikuje ją jako wydanie:
+# https://github.com/panbadek/Knieja-punkty/releases/latest/download/Kniejapunkty.apk
+name: Aplikacja Android (APK)
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/apk.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apk:
+    if: github.repository == 'panbadek/Knieja-punkty'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.10.2" }
+      - name: Klucz podpisu
+        env: { KS_B64: "${{ secrets.KS_B64 }}" }
+        run: |
+          if [ -n "$KS_B64" ]; then echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ks.jks";
+          else keytool -genkeypair -keystore "$RUNNER_TEMP/ks.jks" -storepass knieja-apk -keypass knieja-apk -alias knieja -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Kniejapunkty"; fi
+      - name: Budowanie
+        env: { KS_PATH: "${{ runner.temp }}/ks.jks", KS_PASS: "knieja-apk" }
+        run: gradle -p android assembleRelease -PversionCode=${{ github.run_number }} --no-daemon
+      - name: Publikacja
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk Kniejapunkty.apk
+          gh release create "apk-${{ github.run_number }}" Kniejapunkty.apk --latest \
+            --title "Kniejapunkty – aplikacja Android (wersja 1.${{ github.run_number }})" \
+            --notes "Pobierz Kniejapunkty.apk na telefonie i zainstaluj (zezwól na instalację z tego źródła). Aplikacja otwiera https://panbadek.github.io/Knieja-punkty/"

@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-170251";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-170251";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-172354";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD } from "./scoring.js?v=20261022-172354";
 
-const BUILD = "20261022-170251";
+const BUILD = "20261022-172354";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -451,7 +451,10 @@ async function loadPhotos(alarmId) {
 let _jszip = null;
 const loadJSZip = () => _jszip || (_jszip = new Promise((res, rej) => { const sc = document.createElement("script");
   sc.src = "vendor/jszip.min.js"; sc.onload = () => res(window.JSZip); sc.onerror = () => { _jszip = null; rej(new Error("Nie udało się wczytać modułu ZIP")); }; document.head.appendChild(sc); }));
-function saveBlob(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = name;
+const inApp = () => typeof window.KniejaApp !== "undefined";
+function saveBlob(blob, name) {
+  if (inApp()) { const r = new FileReader(); r.onload = () => window.KniejaApp.saveFile(String(r.result).split(",")[1], name, blob.type || "application/octet-stream"); r.readAsDataURL(blob); return; }
+  const u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 10000); }
 async function zipAlarms(alarms, name, btn) {
   const t = btn.textContent; btn.disabled = true; S.busy = true;
@@ -489,8 +492,9 @@ function bindPhotos() {
   $$("[data-big]").forEach(f => f.onclick = () => { const [aid, pid] = f.dataset.big.split("|"); const p = S.photoCache[aid].find(x => x.id === pid);
     const m = $("#modal"); m.hidden = false;
     m.innerHTML = `<div class="box"><img src="${p.img}" alt=""><div class="mut">${esc(p.m.imie)} · ${esc(p.m.zastep)} · ${plTime(p.m.czasMs)}</div>
-      <div class="row"><a class="btn pri" href="${p.img}" download="${esc(photoName(p.m))}">⬇ Pobierz</a><button id="mclose">Zamknij</button></div></div>`;
-    $("#mclose").onclick = () => { m.hidden = true; m.innerHTML = ""; }; });
+      <div class="row"><a class="btn pri" id="mdl" href="${p.img}" download="${esc(photoName(p.m))}">⬇ Pobierz</a><button id="mclose">Zamknij</button></div></div>`;
+    $("#mclose").onclick = () => { m.hidden = true; m.innerHTML = ""; };
+    $("#mdl").onclick = e => { if (!inApp()) return; e.preventDefault(); window.KniejaApp.saveFile(p.img.split(",")[1], photoName(p.m), "image/jpeg"); }; });
 }
 
 // --- szczegóły alarmu (meldunki)
@@ -743,7 +747,9 @@ function vJa() {
       ${canMeldowac() || my.length ? tile("Twoje alarmy", cnt("zaakceptowany"), `zaakceptowane · ${cnt("oczekuje")} czeka · ${cnt("odrzucony")} odrzucone`) : ""}
       ${rola() === "zastepowy" || myZb.length ? tile("Zgłoszone przez Ciebie zbiórki", myZb.filter(x => x.status === "zatwierdzona").length, `zatwierdzone · ${myZb.filter(x => x.status === "oczekuje").length} czeka`) : ""}
     </div>
-    <p class="mut">Adres aplikacji: <b>panbadek.github.io/Knieja-punkty</b> · wersja ${BUILD}</p>
+    ${!inApp() && /Android/i.test(navigator.userAgent) ? `<div class="row"><a class="btn pri" href="https://github.com/panbadek/Knieja-punkty/releases/latest/download/Kniejapunkty.apk">📱 Pobierz aplikację na Androida (APK)</a></div>
+      <p class="mut">Po pobraniu otwórz plik i zezwól na instalację z tego źródła. Aplikacja otwiera Kniejapunkty w pełnym oknie, z logo na ekranie głównym.</p>` : ""}
+    <p class="mut">Adres aplikacji: <b>panbadek.github.io/Knieja-punkty</b> · wersja ${BUILD}${inApp() ? " · aplikacja Android" : ""}</p>
     <div class="row"><button id="jaout">Wyloguj się</button></div>`;
   return `<div class="card"><h2>🏕 Zastęp${ZASTEPY.includes(z) ? ": " + z : ""}</h2><p class="mut">Kwartał: ${esc(q.nazwa)} (${plDay(q.start)} – ${plDay(q.end)})</p>${zast}</div>
     <div class="card"><h2>👤 Dane użytkownika</h2>${dane}</div>
@@ -919,8 +925,13 @@ async function archXlsx(a) {
 }
 // --- wydruk / PDF
 function printArch(a) {
+  const html = archHtml(a);
+  if (inApp()) return window.KniejaApp.printHtml(html, "Punktacja " + a.nazwa);
   const w = window.open("", "_blank"); if (!w) return alert("Przeglądarka zablokowała nowe okno — zezwól na wyskakujące okna.");
-  w.document.write(`<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Punktacja ${xe(a.nazwa)}</title><style>
+  w.document.write(html.replace("</body>", "<script>window.onload=()=>setTimeout(()=>print(),300)<\/script></body>")); w.document.close();
+}
+function archHtml(a) {
+  return (`<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>Punktacja ${xe(a.nazwa)}</title><style>
     body{font:14px/1.4 Arial,sans-serif;margin:24px;color:#111}h1{font-size:20px;margin:0 0 4px}p{color:#555;margin:0 0 14px}
     table{border-collapse:collapse;width:100%;margin-bottom:22px}th,td{border:1px solid #ccc;padding:5px 7px;text-align:left}th{background:#eef2ea}td.n{text-align:right}
     h2{font-size:16px;margin:18px 0 6px}</style></head><body>
@@ -929,8 +940,7 @@ function printArch(a) {
     ${(a.ranking || []).map(r => `<tr><td>${r.miejsce}.</td><td><b>${xe(r.zastep)}</b></td><td class="n">${frac(r.zbiorki)}</td><td class="n">${frac(r.akcje)}</td><td class="n">${frac(r.alarmy)}</td><td class="n"><b>${frac(r.suma)}</b></td></tr>`).join("")}</table>
     <h2>Historia punktów</h2><table><tr><th>Data</th><th>Zastęp</th><th>Kategoria</th><th>Za co</th><th>Pkt</th></tr>
     ${(a.historia || []).slice().sort((x, y) => x.data.localeCompare(y.data)).map(e => `<tr><td>${plDay(e.data)}</td><td>${xe(e.zastep)}</td><td>${xe(KAT[e.kat] || "")}</td><td>${xe(e.opis)}<br><small>${xe(e.info)}</small></td><td class="n">${xe(sgn(e.pkt))}</td></tr>`).join("")}</table>
-    <script>window.onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
-  w.document.close();
+    </body></html>`);
 }
 
 // ---------- USTAWIENIA (kadra)

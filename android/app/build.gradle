@@ -1,0 +1,27 @@
+plugins { id 'com.android.application' }
+
+def vc = (project.findProperty('versionCode') ?: '1').toString().toInteger()
+
+android {
+    namespace 'pl.knieja.punkty'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'pl.knieja.punkty'
+        minSdk 24
+        targetSdk 34
+        versionCode vc
+        versionName "1.${vc}"
+    }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('KS_PATH') ?: 'ks.jks')
+            storePassword System.getenv('KS_PASS')
+            keyAlias 'knieja'
+            keyPassword System.getenv('KS_PASS')
+        }
+    }
+    buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+dependencies { implementation 'androidx.core:core:1.13.1' }

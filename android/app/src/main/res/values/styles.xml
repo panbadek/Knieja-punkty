@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tlo">#7E9138</color>
+    <color name="pasek">#2F5D3A</color>
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/pasek</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowBackground">@color/pasek</item>
+    </style>
+</resources>
