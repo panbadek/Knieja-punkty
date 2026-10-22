@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261022-203450";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts } from "./scoring.js?v=20261022-203450";
+import { firebaseConfig } from "./firebase-config.js?v=20261022-205117";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts } from "./scoring.js?v=20261022-205117";
 
-const BUILD = "20261022-203450";
+const BUILD = "20261022-205117";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -1039,7 +1039,7 @@ function vUsers() {
    <div class="scroll"><table><tr><th>Imię i nazwisko</th><th>Login</th>${adm ? "<th>Hasło</th>" : ""}<th>Funkcja</th><th>Zastęp</th><th></th></tr>
    ${users.map(u => `<tr><td>${esc(u.imie)}${u.id === S.user.uid ? ` <span class="badge">Ty</span>` : ""}</td><td>${esc(loginOfUser(u))}</td>
    ${adm ? `<td>${S.secrets?.[u.id] ? `<button data-show="${u.id}" class="mut">pokaż</button>` : `<span class="mut">nieznane</span>`}</td>` : ""}
-   <td>${ROLE_PL[u.rola] || `<span class="err">${esc(u.rola || "brak")}</span>`}${isAdm(u) ? ` <span class="badge ok">🛡 admin</span>` : ""}</td>
+   <td>${ROLE_PL[u.rola] || `<span class="err">${esc(u.rola || "brak")}</span>`}${isAdm(u) ? `<div><span class="badge ok adm">🛡️ admin</span></div>` : ""}</td>
    <td>${ZASTEPY.includes(u.zastep) ? u.zastep : (["zastepowy", "szeregowy"].includes(u.rola) ? `<span class="err">⚠ brak</span>` : "–")}</td>
    <td><button data-ue="${u.id}" title="Edytuj" aria-label="Edytuj">✎</button></td></tr>`).join("")}</table></div>
    <p class="mut">Kadra zmienia funkcję i zastęp. Administrator dodatkowo zakłada i usuwa konta, zmienia imię i nazwisko, login, hasło i uprawnienia administratora. Hasło każdy może też zmienić sam w zakładce „👤 Ja”.</p></div>`;
