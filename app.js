@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261023-010658";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261023-010658";
+import { firebaseConfig } from "./firebase-config.js?v=20261023-104131";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261023-104131";
 
-const BUILD = "20261023-010658";
+const BUILD = "20261023-104131";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -197,7 +197,7 @@ function vZbiorki() {
       <div class="row"><label style="flex:1">Nazwa sprawności<br><input id="zs_n" list="sp_names" placeholder="np. Kucharz" autocomplete="off" style="width:100%"></label></div>${namesList()}
       <div class="row"><span class="mut">Gwiazdki:</span>${starBtns("zg", S.zsG || 1)}</div>
       <div id="zs_list"></div>
-      <p class="mut">${isKadra() ? "Sprawność od razu zostanie przyznana (zakładka 🎖 Sprawności)." : "Sprawność kadra zatwierdza osobno, w zakładce 🎖 Sprawności."}</p></div>
+      <p class="mut">${isKadra() ? "Sprawność od razu zostanie przyznana (zakładka 🎖 Sprawności)." : "Sprawność i punkty za nią zostaną przyznane dopiero po zatwierdzeniu przez kadrę (osobno, w zakładce 🎖 Sprawności). Do tego czasu nikt jej nie ma i punkty się nie liczą."}</p></div>
     <div class="row"><button class="pri" id="zadd">Zgłoś</button></div>
     <p class="mut">Można zgłaszać tylko zbiórki z bieżącego kwartału: <b>${esc(cq.nazwa)}</b> (${plDay(cq.start)} – ${plDay(cq.end)}).<br>
     Zbiórka liczy się do punktacji dopiero po zatwierdzeniu przez kadrę. Liczy się jedna zbiórka na tydzień (pon–nd).</p></div>`;
@@ -256,7 +256,9 @@ binders.zbiorki = () => {
     updateDoc(doc(db, "zbiorkiZastepu", el.dataset.zs), { zastep: el.value }).catch(err));
   $$("[data-ok]").forEach(b => b.onclick = () => updateDoc(doc(db, "zbiorkiZastepu", b.dataset.ok), { status: "zatwierdzona", zatwierdzil: S.user.uid, zatwierdzilImie: myName(), zatwierdzono: serverTimestamp() }).catch(err));
   $$("[data-no]").forEach(b => b.onclick = () => updateDoc(doc(db, "zbiorkiZastepu", b.dataset.no), { status: "odrzucona", zatwierdzil: S.user.uid, zatwierdzilImie: myName(), zatwierdzono: serverTimestamp() }).catch(err));
-  $$("[data-del]").forEach(b => b.onclick = () => confirm("Usunąć zgłoszenie?") && deleteDoc(doc(db, "zbiorkiZastepu", b.dataset.del)).catch(err));
+  $$("[data-del]").forEach(b => b.onclick = () => { const id = b.dataset.del, sp = S.sprawnosci.filter(s => s.zbiorkaId === id && s.status === "oczekuje");
+    if (!confirm("Usunąć zgłoszenie?" + (sp.length ? " Czekająca sprawność z tej zbiórki też zostanie usunięta." : ""))) return;
+    Promise.all([deleteDoc(doc(db, "zbiorkiZastepu", id)), ...sp.map(s => deleteDoc(doc(db, "sprawnosci", s.id)))]).catch(err); });
 };
 
 // ---------- wspólne dla edytorów
@@ -646,7 +648,7 @@ function calyList(z, g, nazwa) {
   return `<p class="mut">Zaznacz przy każdym harcerzu: zdobył(a) sprawność na tej zbiórce, czy już ją miał(a), ale był(a) na zbiórce.</p>
     <div class="clist">${c.map(u => `<div class="crow"><span>${esc(u.imie)}${u.ma ? ` <span class="mut">· ma już w aplikacji</span>` : ""}</span>
     <span class="seg"><button data-cm="${u.uid}|z" class="${u.st === "z" ? "on" : ""}">✔ zdobył(a)</button><button data-cm="${u.uid}|m" class="${u.st === "m" ? "on" : ""}">już ma</button></span></div>`).join("")}</div>
-    <p class="mut">${earn ? `Zdobyło: <b>${earn}</b> os.${c.length - earn ? ` · już miało: ${c.length - earn} os.` : ""} → <b>${earn} × 2 × ${frac(one)} = ${frac(earn * 2 * one)} pkt</b> dla zastępu (jakby każdy, kto zdobył, zdobył ją 2 razy).`
+    <p class="mut">${earn ? `Zdobyło: <b>${earn}</b> os.${c.length - earn ? ` · już miało: ${c.length - earn} os.` : ""} → ${isKadra() ? "zastęp dostanie" : "po zatwierdzeniu przez kadrę zastęp dostanie"} <b>${earn} × 2 × ${frac(one)} = ${frac(earn * 2 * one)} pkt</b> (jakby każdy, kto zdobył, zdobył ją 2 razy).`
       : `<span class="err">Nikt nie jest zaznaczony jako „zdobył(a)”.</span>`}</p>`;
 }
 const calySplit = (z, g, nazwa) => { const c = calyStan(z, g, nazwa), pick = st => c.filter(u => u.st === st).map(({ uid, imie }) => ({ uid, imie }));
