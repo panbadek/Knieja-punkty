@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261026-160614";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261026-160614";
+import { firebaseConfig } from "./firebase-config.js?v=20261026-201941";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261026-201941";
 
-const BUILD = "20261026-160614";
+const BUILD = "20261026-201941";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -1309,12 +1309,15 @@ function vUstawienia() {
    <h3>Alarm — punkty za osobę w progach</h3>${list("alarmProgi")}<h3>Alarm — bonus za kolejność zastępów</h3>${list("alarmBonus")}
    <h3>Alarm — domyślne progi czasowe (min)</h3>${list("alarmProgiMin")}
    <h3>Liczebność zastępów (h)</h3><div class="row">${ZASTEPY.map(z => `<label>${z} <input type="number" data-l="${z}" value="${c.liczebnosc[z] ?? ""}"></label>`).join("")}</div>
+   <div class="row"><button id="lacc">👥 Ustaw według liczby kont</button></div>
+   <p class="mut">Liczba kont w aplikacji (szeregowi i zastępowi): ${ZASTEPY.map(z => `${z} <b>${kontaZ(z)}</b>`).join(" · ")}. Zastęp bez kont zachowuje obecną liczebność. Harcerze bez konta nie są liczeni.</p>
    <h3>Kwartały</h3><div id="kw">${c.kwartaly.map((q, i) => `<div class="row"><input data-k="${i}.nazwa" value="${esc(q.nazwa)}">
      <input type="date" data-k="${i}.start" value="${q.start}"><input type="date" data-k="${i}.end" value="${q.end}"><button class="del" data-kdel="${i}">✖</button></div>`).join("")}</div>
    <button id="kadd">+ Kwartał</button>
    <div class="row" style="margin-top:14px"><button class="pri" id="csave">Zapisz ustawienia</button></div>
    <p class="mut">Zmiana ustawień przelicza wszystkie wyniki od nowa. Streak zeruje się na początku każdego kwartału.</p></div>`;
 }
+const kontaZ = z => S.users.filter(u => u.zastep === z && ["szeregowy", "zastepowy"].includes(u.rola)).length;
 const streakExample = c => "Np.: " + [1, 2, 3, 4, 5].map(n => `${n}. zbiórka ${frac(zbiorkaPts(c, n))}`).join(" · ") + " pkt";
 binders.ustawienia = () => {
   const ex = () => { const b = Number($('[data-c="base"]').value), x = Number($('[data-c="przyrost"]').value); $("#sex").textContent = streakExample({ base: b, przyrost: x }); };
@@ -1331,6 +1334,15 @@ binders.ustawienia = () => {
   $("#kadd").onclick = () => { read(); c.kwartaly.push({ nazwa: "Nowy kwartał", start: today(), end: today() }); S.cfg = c; render(); };
   $$("[data-kdel]").forEach(b => b.onclick = () => { read(); c.kwartaly.splice(+b.dataset.kdel, 1); S.cfg = c; render(); });
   $("#csave").onclick = () => { read(); c.step = c.base ? c.przyrost / c.base : 0; setDoc(doc(db, "config", "main"), c).then(() => alert("Zapisano")).catch(err); };
+  // liczebność = liczba kont przypisanych do zastępu (zapisuje od razu, razem z resztą formularza)
+  $("#lacc").onclick = () => {
+    const zm = ZASTEPY.filter(z => kontaZ(z) > 0), opis = zm.map(z => `${z}: ${c.liczebnosc[z] ?? "–"} → ${kontaZ(z)}`).join("\n");
+    if (!zm.length) return alert("Żaden zastęp nie ma jeszcze przypisanych kont.");
+    if (!confirm(`Ustawić liczebność według liczby kont i zapisać ustawienia?\n\n${opis}`)) return;
+    zm.forEach(z => { const el = document.querySelector(`[data-l="${z}"]`); if (el) el.value = kontaZ(z); });
+    read(); c.step = c.base ? c.przyrost / c.base : 0;
+    setDoc(doc(db, "config", "main"), c).then(() => alert("Zapisano liczebność zastępów.")).catch(err);
+  };
 };
 
 // ---------- UŻYTKOWNICY (tylko administrator)
