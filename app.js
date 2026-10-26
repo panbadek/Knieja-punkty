@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261023-115051";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261023-115051";
+import { firebaseConfig } from "./firebase-config.js?v=20261026-160614";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261026-160614";
 
-const BUILD = "20261023-115051";
+const BUILD = "20261026-160614";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -1365,12 +1365,124 @@ function sortUsers(list, by) {
                 imie: name }[by] || name;
   return [...list].sort(cmp);
 }
+// ---------- WIELE KONT NARAZ (administrator) + pakiety loginów i haseł zastępami
+// Lista: wiersz z nazwą zastępu, pod nim osoby „Imię Nazwisko; login; hasło” (login i hasło można pominąć — zostaną wygenerowane).
+// Dopiski w nawiasach (np. stopnie) są pomijane. Osoby, które mają już konto (to samo imię i nazwisko), są pomijane.
+const normName = n => normLogin(n).split(/[._-]+/).filter(Boolean).sort().join(" ");
+function parseImport(text) {
+  const rows = [], bad = []; let z = "";
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = raw.trim(); if (!line) continue;
+    const zz = ZASTEPY.find(x => x.toLowerCase() === line.replace(/[:\-–—\s\d()]+$/, "").trim().toLowerCase());
+    if (zz) { z = zz; continue; }
+    const [imieRaw, login = "", haslo = ""] = line.split(/\s*[;\t]\s*/);
+    const imie = imieRaw.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+    if (!imie) continue;
+    if (!z) { bad.push(line); continue; }
+    rows.push({ zastep: z, imie, login: normLogin(login) || normLogin(imie), haslo: haslo.trim() });
+  }
+  return { rows, bad };
+}
+function prepImport(rows) {
+  const taken = new Set(S.users.map(loginOfUser));
+  return rows.map(r => {
+    const ex = S.users.find(u => normName(u.imie || "") === normName(r.imie));
+    let login = r.login, n = 2;
+    if (!ex) { while (taken.has(login)) login = r.login + n++; taken.add(login); }
+    return { ...r, login, zm: login !== r.login, haslo: r.haslo.length >= 6 ? r.haslo : genPass(), nowe: r.haslo.length < 6,
+      ex: ex ? { login: loginOfUser(ex), zastep: ex.zastep || "" } : null, take: !ex };
+  });
+}
+function vImport() {
+  const v = S.view;
+  if (!v.rows) return `<div class="card"><div class="row"><button id="back">← Konta</button></div><h2>📥 Dodaj wiele kont</h2>
+    <p class="mut">Wklej listę: najpierw wiersz z nazwą zastępu, pod nim osoby — każda w osobnym wierszu: <b>Imię Nazwisko; login; hasło</b>.
+    Login i hasło możesz pominąć (zostaną wygenerowane). Dopiski w nawiasach, np. stopnie, są pomijane. Wszyscy dostają funkcję „szeregowy” — zastępowych zmienisz potem na liście kont.</p>
+    <textarea id="imp_t" rows="14" style="width:100%" placeholder="Lisy&#10;Jan Kowalski; jan.kowalski; haslo123&#10;Adam Nowak&#10;&#10;Łosie&#10;…"></textarea>
+    <div class="row"><button class="pri" id="imp_chk">Sprawdź listę →</button></div></div>`;
+  const take = v.rows.filter(r => r.take).length, cnt = {}; v.rows.forEach(r => cnt[r.zastep] = (cnt[r.zastep] || 0) + 1);
+  const rows = ZASTEPY.filter(z => cnt[z]).map(z => `<h3>${z} <span class="mut">(${cnt[z]} na liście)</span></h3><div class="clist">${v.rows.map((r, i) => r.zastep !== z ? "" :
+    `<div class="crow"><label class="chk" style="flex:1"><input type="checkbox" data-it="${i}" ${r.take ? "checked" : ""}> <span><b>${esc(r.imie)}</b><br>
+      <span class="mut">${r.ex ? `ma już konto: ${esc(r.ex.login)}${r.ex.zastep !== z ? ` · <span class="err">w aplikacji: ${esc(r.ex.zastep || "bez zastępu")}</span>` : ""}`
+        : `login: ${esc(r.login)}${r.zm ? " (zajęty — dodano numer)" : ""} · hasło: ${esc(r.haslo)}${r.nowe ? " (wygenerowane)" : ""}`}</span></span></label></div>`).join("")}</div>`).join("");
+  return `<div class="card"><div class="row"><button id="back">← Konta</button></div><h2>📥 Dodaj wiele kont — sprawdzenie</h2>
+    <p class="mut">Zaznaczone osoby dostaną nowe konta. Osoby, które mają już konto (to samo imię i nazwisko), są odznaczone.</p>
+    ${v.bad?.length ? `<p class="err">Pominięto wiersze bez zastępu nad nimi: ${v.bad.map(esc).join(" · ")}</p>` : ""}
+    ${rows}
+    <div class="row"><label class="chk"><input type="checkbox" id="imp_l"> Ustaw liczebność zastępów według tej listy (${ZASTEPY.filter(z => cnt[z]).map(z => `${z} ${cnt[z]}`).join(", ")})</label></div>
+    <div class="row"><button class="pri" id="imp_go" ${take ? "" : "disabled"}>Utwórz konta (${take})</button><button id="imp_edit">← Popraw listę</button></div>
+    <p class="mut" id="imp_log"></p></div>`;
+}
+function bindImport() {
+  $("#back").onclick = () => { S.view = null; render(); };
+  if (!S.view.rows) { $("#imp_t").value = S.view.text || "";
+    $("#imp_chk").onclick = () => { const text = $("#imp_t").value, { rows, bad } = parseImport(text);
+      if (!rows.length) return alert("Nie znalazłem żadnej osoby pod nazwą zastępu. Pierwszy wiersz to nazwa zastępu, np. „Lisy”.");
+      S.view = { kind: "import", text, rows: prepImport(rows), bad }; render(); };
+    return; }
+  $$("[data-it]").forEach(c => c.onchange = () => { S.view.rows[+c.dataset.it].take = c.checked;
+    const n = S.view.rows.filter(r => r.take).length, b = $("#imp_go"); b.textContent = `Utwórz konta (${n})`; b.disabled = !n; });
+  $("#imp_edit").onclick = () => { S.view = { kind: "import", text: S.view.text }; render(); };
+  $("#imp_go").onclick = () => runImport($("#imp_go"));
+}
+async function runImport(btn) {
+  const v = S.view, rows = v.rows.filter(r => r.take), setL = $("#imp_l")?.checked;
+  if (!confirm(`Utworzyć ${rows.length} ${plural(rows.length, "konto", "konta", "kont")}?`)) return;
+  S.busy = true; btn.disabled = true; $("#imp_edit").disabled = true; const log = $("#imp_log"), done = [], errs = [];
+  for (const [i, r] of rows.entries()) {
+    btn.textContent = `Tworzę ${i + 1} z ${rows.length}…`;
+    try {
+      let login = r.login, n = 2; while (await loginTaken(login)) login = r.login + n++;
+      const email = "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) + DOMAIN;
+      const c = await createUserWithEmailAndPassword(secAuth(), email, r.haslo); await signOut(secAuth()).catch(() => {});
+      const uid = c.user.uid;
+      await setDoc(doc(db, "users", uid), { email, login, imie: r.imie, rola: "szeregowy", admin: false, zastep: r.zastep });
+      await setDoc(doc(db, "loginy", login), { email, uid });
+      await setDoc(doc(db, "sekrety", uid), { haslo: r.haslo });
+      S.secrets = { ...S.secrets, [uid]: r.haslo }; done.push(uid);
+    } catch (e) { errs.push(`${r.imie}: ${PL_ERR[e.code] || e.message || e}`); }
+    if (log) log.textContent = `Utworzono ${done.length}${errs.length ? ` · błędy: ${errs.length}` : ""}`;
+  }
+  if (setL) { const cnt = {}; v.rows.forEach(r => cnt[r.zastep] = (cnt[r.zastep] || 0) + 1);
+    try { await setDoc(doc(db, "config", "main"), { ...S.cfg, liczebnosc: { ...S.cfg.liczebnosc, ...cnt } }); } catch (e) { errs.push("Liczebność zastępów: " + (e.message || e)); } }
+  S.busy = false; S.view = { kind: "pakiety", nowe: done, errs, tylkoNowe: done.length > 0 }; render();
+}
+// --- pakiety: loginy i hasła zastępami, do skopiowania i wysłania
+function pakietTxt(z, list) {
+  return `Kniejapunkty — konta zastępu ${z}\n${APP_URL}\n\n` + list.map(u => `${u.imie || loginOfUser(u)}\n  login: ${loginOfUser(u)}\n  hasło: ${S.secrets?.[u.id] || "(nieznane — administrator może ustawić nowe)"}`).join("\n\n")
+    + `\n\nHasło każdy może zmienić sam w zakładce „👤 Ja”.`;
+}
+function vPakiety() {
+  if (!isAdmin()) { S.view = null; return vUsers(); }
+  const v = S.view, nowe = new Set(v.nowe || []), only = v.tylkoNowe && nowe.size;
+  const groups = ZASTEPY.map(z => ({ z, list: sortUsers(S.users.filter(u => u.zastep === z && (!only || nowe.has(u.id))), "funkcja") })).filter(g => g.list.length);
+  return `<div class="card"><div class="row"><button id="back">← Konta</button></div><h2>📦 Loginy i hasła zastępami</h2>
+    ${nowe.size ? `<p>✅ Utworzono <b>${nowe.size}</b> ${plural(nowe.size, "konto", "konta", "kont")}.</p>` : ""}
+    ${v.errs?.length ? `<p class="err">Nie udało się: ${v.errs.map(esc).join(" · ")}</p>` : ""}
+    ${nowe.size ? `<div class="row"><label class="chk"><input type="checkbox" id="pk_only" ${only ? "checked" : ""}> Pokaż tylko nowo utworzone konta</label></div>` : ""}
+    <p class="mut">Każdy pakiet możesz skopiować i wysłać zastępowemu albo harcerzom (np. na Messengerze).</p>
+    <div class="row"><button id="pk_all">📋 Kopiuj wszystkie</button></div></div>
+    ${groups.map((g, i) => `<div class="card"><h3 style="margin-top:0">${g.z} <span class="mut">(${g.list.length})</span></h3>
+      <pre class="pak" id="pk_${i}">${esc(pakietTxt(g.z, g.list))}</pre>
+      <div class="row"><button class="pri" data-pk="${i}">📋 Kopiuj</button>${navigator.share ? `<button data-pks="${i}">📤 Udostępnij</button>` : ""}</div></div>`).join("")
+      || `<div class="card"><p class="mut">Brak kont przypisanych do zastępów.</p></div>`}`;
+}
+function bindPakiety() {
+  $("#back").onclick = () => { S.view = null; render(); };
+  $("#pk_only") && ($("#pk_only").onchange = e => { S.view.tylkoNowe = e.target.checked; render(); });
+  $$("[data-pk]").forEach(b => b.onclick = () => copyText($("#pk_" + b.dataset.pk).textContent, b));
+  $$("[data-pks]").forEach(b => b.onclick = () => navigator.share({ text: $("#pk_" + b.dataset.pks).textContent }).catch(() => {}));
+  $("#pk_all").onclick = () => copyText([...$$(".pak")].map(p => p.textContent).join("\n\n— — —\n\n"), $("#pk_all"));
+}
+
 function vUsers() {
   if (!isKadra()) return `<div class="card"><p class="err">Tylko kadra ma dostęp do kont.</p></div>`;
   if (S.edit?.kind === "user") return vUserEdit();
+  if (S.view?.kind === "import" && isAdmin()) return vImport();
+  if (S.view?.kind === "pakiety") return vPakiety();
   const adm = isAdmin();
   const users = sortUsers(S.users, S.uSort);
-  return `<div class="card"><h2>Konta <span class="badge">${users.length}</span></h2>${adm ? `<div class="row"><button class="pri" id="unew">+ Nowe konto</button></div>` : ""}
+  return `<div class="card"><h2>Konta <span class="badge">${users.length}</span></h2>${adm ? `<div class="row"><button class="pri" id="unew">+ Nowe konto</button><button id="uimp">📥 Dodaj wiele kont</button><button id="upak">📦 Loginy i hasła zastępami</button></div>` : ""}
    <div class="row"><span class="mut">Sortuj:</span>${[["funkcja", "funkcja"], ["zastep", "zastęp"], ["imie", "imię i nazwisko"]].map(([v, l]) =>
      `<button data-usort="${v}" class="${S.uSort === v ? "on" : ""}">${l}</button>`).join("")}</div>
    <div class="scroll"><table><tr><th>Imię i nazwisko</th><th>Login</th>${adm ? "<th>Hasło</th>" : ""}<th>Funkcja</th><th>Zastęp</th><th></th></tr>
@@ -1410,6 +1522,10 @@ function vUserEdit() {
 binders.uzytkownicy = () => {
   if (!isKadra()) return;
   if (S.edit?.kind === "user") return bindUserEdit();
+  if (S.view?.kind === "import" && isAdmin()) return bindImport();
+  if (S.view?.kind === "pakiety") return bindPakiety();
+  $("#uimp") && ($("#uimp").onclick = () => { S.view = { kind: "import" }; render(); });
+  $("#upak") && ($("#upak").onclick = () => { S.view = { kind: "pakiety" }; render(); });
   $$("[data-usort]").forEach(b => b.onclick = () => { S.uSort = b.dataset.usort; try { localStorage.setItem("uSort", S.uSort); } catch (e) {} render(); });
   $("#unew") && ($("#unew").onclick = () => { S.edit = { kind: "user", d: emptyUser() }; render(); });
   $$("[data-ue]").forEach(b => b.onclick = () => { const u = S.users.find(x => x.id === b.dataset.ue);
