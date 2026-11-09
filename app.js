@@ -4,10 +4,10 @@ import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, signI
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs, query, where, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig } from "./firebase-config.js?v=20261026-201941";
-import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261026-201941";
+import { firebaseConfig } from "./firebase-config.js?v=20261109-095627";
+import { ZASTEPY, DEFAULT_CONFIG, quarterTotals, akcjaPoints, alarmPoints, alarmProgiMin, progIndex, meldMinute, frac, streakPoints, monday, parseD, fmtD, streakInc, zbiorkaPts, sprawPts } from "./scoring.js?v=20261109-095627";
 
-const BUILD = "20261026-201941";
+const BUILD = "20261109-095627";
 const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
 
 // ---------- wersja aplikacji: sprawdzanie, czy na serwerze jest nowsza (telefony długo trzymają stare pliki)
@@ -158,7 +158,6 @@ binders.login = () => {
 // ---------- WYNIKI
 function vWyniki() {
   if (S.view?.kind === "hist") return vHist(null);
-  if (S.view?.kind === "chart") return vChart();
   if (S.view?.kind === "arch") return vArch();
   if (S.view?.kind === "odrz") return vOdrz();
   const t = quarterTotals(S.cfg, quarter(), S, today());
@@ -170,16 +169,14 @@ function vWyniki() {
     <div class="pts">${frac(t[z].suma)}</div></div>`; }).join("");
   const det = ZASTEPY.map(z => `<details><summary><b>${z}</b> — historia streaka</summary><table><tr><th>Tydzień</th><th class="n">n</th><th class="n">Pkt</th><th></th></tr>
     ${t[z].log.map(l => `<tr><td>${plDay(l.tydzien)}</td><td class="n">${l.n}</td><td class="n">${frac(l.pkt)}</td><td class="mut">${l.info || ""}</td></tr>`).join("") || `<tr><td colspan=4 class="mut">brak</td></tr>`}</table></details>`).join("");
-  return `<div class="card"><h2>Ranking</h2>${quarterPicker()}<div class="row"><button id="chart">📈 Wykres punktacji</button>${isKadra() ? `<button id="hist">📜 Historia punktów</button><button id="arch">🗄 Archiwum kwartałów</button>` : ""}${odrzBtn()}</div><div class="rank">${items}</div></div><div class="card"><h2>Szczegóły streaków</h2>${det}</div>`;
+  return `<div class="card"><h2>Ranking</h2>${quarterPicker()}${isKadra() || odrzBtn() ? `<div class="row">${isKadra() ? `<button id="hist">📜 Historia punktów</button><button id="arch">🗄 Archiwum kwartałów</button>` : ""}${odrzBtn()}</div>` : ""}<div class="rank">${items}</div></div><div class="card"><h2>Szczegóły streaków</h2>${det}</div>${chartCard()}`;
 }
 
 binders.wyniki = () => {
   if (S.view?.kind === "hist") return bindHist(null);
-  if (S.view?.kind === "chart") return bindChart();
   if (S.view?.kind === "arch") return bindArch();
   if (S.view?.kind === "odrz") return bindOdrz();
-  bindHistBtn(); bindOdrzBtn();
-  $("#chart").onclick = () => { S.view = { kind: "chart" }; render(); };
+  bindHistBtn(); bindOdrzBtn(); bindChart();
   $("#arch") && ($("#arch").onclick = () => { S.view = { kind: "arch" }; render(); });
 };
 
@@ -1111,7 +1108,7 @@ binders.ja = () => {
   });
 };
 
-// ---------- WYKRES PUNKTACJI (narastająco w kwartale)
+// ---------- WYKRES PUNKTACJI (narastająco w kwartale) — łagodne krzywe przez stan na koniec każdego tygodnia
 const SERIES = ["s1", "s2", "s3", "s4", "s5", "s6"];          // kolory zastępów: stała kolejność (CSS --s1…--s6)
 const zColor = z => `var(--${SERIES[ZASTEPY.indexOf(z)]})`;
 function chartData(q) {
@@ -1122,57 +1119,112 @@ function chartData(q) {
     return { z, vals: days.map(d => (acc += byDay[d] || 0)) }; });
   return { days, series };
 }
-const niceStep = max => { const raw = max / 5, p = Math.pow(10, Math.floor(Math.log10(raw || 1))); return [1, 2, 2.5, 5, 10].map(m => m * p).find(s => s >= raw) || p * 10; };
-function chartSvg(q, W) {
-  const { days, series } = chartData(q); if (!days.length) return `<p class="mut">Kwartał jeszcze się nie zaczął.</p>`;
-  const H = 260, L = 40, R = 14, T = 12, B = 28, w = W - L - R, h = H - T - B;
-  const maxV = Math.max(10, ...series.flatMap(s => s.vals)), minV = Math.min(0, ...series.flatMap(s => s.vals));
-  const step = niceStep(maxV - minV), top = Math.ceil(maxV / step) * step, bot = Math.floor(minV / step) * step;
-  const x = i => L + (days.length === 1 ? w / 2 : i * w / (days.length - 1)), y = v => T + h - (v - bot) / (top - bot || 1) * h;
-  let grid = ""; for (let v = bot; v <= top + 1e-9; v += step) grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="gl${v === 0 ? " g0" : ""}"/><text x="${L - 6}" y="${y(v) + 4}" class="ax" text-anchor="end">${Math.round(v)}</text>`;
-  let xt = ""; days.forEach((d, i) => { if (parseD(d) === monday(parseD(d)) || i === 0) { const lbl = d.slice(8, 10) + "." + d.slice(5, 7);
-    if (i === 0 || x(i) - x(0) > 34) xt += `<line x1="${x(i)}" x2="${x(i)}" y1="${T + h}" y2="${T + h + 4}" class="gl"/><text x="${x(i)}" y="${H - 8}" class="ax" text-anchor="middle">${lbl}</text>`; } });
-  const path = vals => vals.map((v, i) => (i ? `H${x(i).toFixed(1)}V${y(v).toFixed(1)}` : `M${x(0).toFixed(1)},${y(v).toFixed(1)}`)).join("");
-  const lines = series.map(s => `<path d="${path(s.vals)}" fill="none" stroke="${zColor(s.z)}" stroke-width="2" stroke-linejoin="round"/>
-    <circle cx="${x(days.length - 1)}" cy="${y(s.vals.at(-1))}" r="4.5" fill="${zColor(s.z)}" class="dot"/>`).join("");
-  return `<svg id="chsvg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Punkty zastępów narastająco w kwartale">
-    ${grid}${xt}${lines}<line id="chx" x1="0" x2="0" y1="${T}" y2="${T + h}" class="cross" visibility="hidden"/>
-    <rect x="${L}" y="${T}" width="${w}" height="${h}" fill="transparent" id="chhit"/></svg>`;
+// punkty wykresu: początek kwartału (0), koniec każdego tygodnia (niedziela) i dzisiaj; off = dni od początku kwartału
+function chartPoints(q) {
+  const { days, series } = chartData(q); if (!days.length) return null;
+  const pts = [{ d: null, off: 0, v: series.map(() => 0) }];
+  days.forEach((d, i) => { if (i === days.length - 1 || parseD(d) === monday(parseD(d)) + 6 * DAY_MS) pts.push({ d, off: i + 1, v: series.map(s => s.vals[i]) }); });
+  // ostatnia niedziela tuż przed „dziś” (mniej niż 3 dni) dawałaby prawie pionowy odcinek — pomijamy ją
+  if (pts.length > 2 && pts.at(-1).off - pts.at(-2).off < 3 && pts.at(-2).off > 0) pts.splice(-2, 1);
+  return { days, series, pts, span: Math.round((parseD(q.end) - parseD(q.start)) / DAY_MS) + 1 };
 }
-function vChart() {
-  const q = quarter(), { days, series } = chartData(q);
-  const last = series.map(s => ({ z: s.z, v: s.vals.at(-1) || 0 })).sort((a, b) => b.v - a.v);
-  const legend = ZASTEPY.map(z => `<span class="lg"><i style="background:${zColor(z)}"></i>${z} <b>${frac(series.find(s => s.z === z).vals.at(-1) || 0)}</b></span>`).join("");
-  const weeks = days.filter((d, i) => i === days.length - 1 || parseD(d) === monday(parseD(d)) + 6 * DAY_MS);
-  const table = `<details><summary class="mut">Pokaż dane w tabeli (stan na koniec każdego tygodnia)</summary><div class="scroll"><table>
+const niceStep = max => { const raw = max / 4, p = Math.pow(10, Math.floor(Math.log10(raw || 1))); return [1, 2, 2.5, 5, 10].map(m => m * p).find(s => s >= raw) || p * 10; };
+// krzywa monotoniczna (Fritsch–Carlson): gładka, ale bez „przestrzeliwania” — nie pokazuje spadków, których nie było
+function smoothPath(P) {
+  const n = P.length, f = v => v.toFixed(1); if (!n) return ""; if (n === 1) return `M${f(P[0][0])},${f(P[0][1])}`;
+  const dx = [], m = [], t = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = P[i + 1][0] - P[i][0] || 1e-6; m[i] = (P[i + 1][1] - P[i][1]) / dx[i]; }
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : 3 * (dx[i - 1] + dx[i]) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]);
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = t[i + 1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], s = a * a + b * b;
+    if (s > 9) { const k = 3 / Math.sqrt(s); t[i] = k * a * m[i]; t[i + 1] = k * b * m[i]; }
+  }
+  let d = `M${f(P[0][0])},${f(P[0][1])}`;
+  for (let i = 0; i < n - 1; i++) { const h = dx[i] / 3;
+    d += `C${f(P[i][0] + h)},${f(P[i][1] + h * t[i])} ${f(P[i + 1][0] - h)},${f(P[i + 1][1] - h * t[i + 1])} ${f(P[i + 1][0])},${f(P[i + 1][1])}`; }
+  return d;
+}
+const CH = { H: 250, L: 36, R: 14, T: 14, B: 30 };
+function chartGeom(cp, W) {
+  const { L, R, T, B, H } = CH, w = W - L - R, h = H - T - B, all = cp.pts.flatMap(p => p.v);
+  const maxV = Math.max(10, ...all), minV = Math.min(0, ...all), step = niceStep(maxV - minV);
+  const top = Math.ceil(maxV / step) * step, bot = Math.floor(minV / step) * step;
+  return { w, h, step, top, bot, x: off => L + off / cp.span * w, y: v => T + h - (v - bot) / (top - bot || 1) * h };
+}
+function chartSvg(q, W) {
+  const cp = chartPoints(q); if (!cp) return `<p class="mut">Kwartał jeszcze się nie zaczął.</p>`;
+  const { L, R, T, H } = CH, g = chartGeom(cp, W), { x, y, h } = g;
+  let grid = ""; for (let v = g.bot; v <= g.top + 1e-9; v += g.step)
+    grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="gl${v === 0 ? " g0" : ""}"/><text x="${L - 8}" y="${y(v) + 4}" class="ax" text-anchor="end">${Math.round(v)}</text>`;
+  // podpisy osi X: początek każdego miesiąca kwartału (i koniec kwartału), bez nachodzenia na siebie
+  let xt = "", lastX = -99; const M = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
+  for (let t = parseD(q.start); t <= parseD(q.end); t += DAY_MS) { const d = fmtD(t); if (d.slice(8) !== "01" && t !== parseD(q.start)) continue;
+    const X = x((t - parseD(q.start)) / DAY_MS); if (X - lastX < 40) continue; lastX = X;
+    xt += `<text x="${X}" y="${H - 9}" class="ax" text-anchor="${X < L + 10 ? "start" : "middle"}">${+d.slice(8)} ${M[+d.slice(5, 7) - 1]}</text>`; }
+  const last = cp.pts.at(-1), isNow = last.d === today() && today() < q.end, xNow = x(last.off);
+  const now = isNow ? `<rect x="${xNow}" y="${T}" width="${Math.max(0, W - R - xNow)}" height="${h}" class="fut"/>
+    <line x1="${xNow}" x2="${xNow}" y1="${T}" y2="${T + h}" class="today"/><text x="${xNow + 5}" y="${T + 11}" class="ax">dziś</text>` : "";
+  // linie rysowane od najniższej do najwyższej, żeby prowadzący był na wierzchu
+  const order = cp.series.map((s, i) => i).sort((a, b) => last.v[a] - last.v[b]);
+  const lines = order.map(i => { const z = cp.series[i].z, P = cp.pts.map(p => [x(p.off), y(p.v[i])]);
+    return `<path d="${smoothPath(P)}" class="ln" stroke="${zColor(z)}"/>`; }).join("");
+  const dots = order.map(i => `<circle cx="${xNow}" cy="${y(last.v[i])}" r="4.5" fill="${zColor(cp.series[i].z)}" class="dot end"/>`).join("");
+  const hov = cp.series.map((s, i) => `<circle r="5" fill="${zColor(s.z)}" class="dot hv" data-hv="${i}" visibility="hidden"/>`).join("");
+  return `<svg id="chsvg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Punkty zastępów narastająco w kwartale">
+    ${now}${grid}${xt}<line id="chx" x1="0" x2="0" y1="${T}" y2="${T + h}" class="cross" visibility="hidden"/>${lines}${dots}${hov}
+    <rect x="${L - 10}" y="0" width="${W - L - R + 20}" height="${H}" fill="transparent" id="chhit"/></svg>`;
+}
+function chartCard() {
+  const q = quarter(), cp = chartPoints(q);
+  const lastV = z => cp ? cp.series.find(s => s.z === z).vals.at(-1) || 0 : 0;
+  const legend = ZASTEPY.map(z => `<span class="lg"><i style="background:${zColor(z)}"></i>${z} <b>${frac(lastV(z))}</b></span>`).join("");
+  const table = !cp ? "" : `<details><summary class="mut">Pokaż dane w tabeli (stan na koniec każdego tygodnia)</summary><div class="scroll"><table>
     <tr><th>Do dnia</th>${ZASTEPY.map(z => `<th class="n">${z}</th>`).join("")}</tr>
-    ${weeks.map(d => { const i = days.indexOf(d); return `<tr><td>${plDay(d)}</td>${series.map(s => `<td class="n">${frac(s.vals[i])}</td>`).join("")}</tr>`; }).join("")}</table></div></details>`;
-  return `<div class="card viz"><div class="row"><button id="back">← Ranking</button></div><h2>📈 Punkty zastępów w kwartale</h2>${quarterPicker()}
-    <div class="legend">${legend}</div><div id="chwrap" style="position:relative"><div id="chsvgbox"></div><div id="chtip" class="tip" hidden></div></div>
-    <p class="mut">Punkty narastająco — linia wznosi się w dniu, w którym zastęp zdobył punkty (zbiórka, akcja, alarm, sprawność, korekta). Dotknij wykresu, żeby zobaczyć stan w danym dniu.</p>
-    ${table}<p class="mut">Prowadzi: <b>${last[0]?.z || "–"}</b> (${frac(last[0]?.v || 0)} pkt)</p></div>`;
+    ${cp.pts.slice(1).map(p => `<tr><td>${plDay(p.d)}</td>${p.v.map(v => `<td class="n">${frac(v)}</td>`).join("")}</tr>`).join("")}</table></div></details>`;
+  return `<div class="card viz"><h2>📈 Punkty zastępów w kwartale</h2>
+    <div class="legend">${legend}</div><div id="chwrap"><div id="chsvgbox"></div><div id="chtip" class="tip" hidden></div></div>
+    <p class="mut">Punkty narastająco, stan na koniec każdego tygodnia. Dotknij wykresu, żeby zobaczyć wyniki z danego tygodnia.</p>${table}</div>`;
 }
 function bindChart() {
-  $("#back").onclick = () => { S.view = null; render(); };
-  const box = $("#chsvgbox"), q = quarter();
+  const box = $("#chsvgbox"); if (!box) return;
+  const q = quarter(), key = qKey(q);
   const draw = () => {
-    box.innerHTML = chartSvg(q, Math.max(280, Math.floor(box.clientWidth)));
+    const bx = $("#chsvgbox"); if (!bx) return;
+    const W = Math.max(280, Math.floor(bx.clientWidth)); bx.innerHTML = chartSvg(q, W);
     const svg = $("#chsvg"), hit = $("#chhit"), cx = $("#chx"), tip = $("#chtip"); if (!svg || !hit) return;
-    const { days, series } = chartData(q);
+    const cp = chartPoints(q), g = chartGeom(cp, W);
+    // łagodne wejście linii — tylko przy pierwszym pokazaniu danego kwartału
+    if (!S._chAnim?.[key] && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      svg.querySelectorAll(".ln").forEach(p => { const len = p.getTotalLength(); p.style.strokeDasharray = len; p.style.strokeDashoffset = len; });
+      svg.querySelectorAll(".end").forEach(c => c.style.opacity = 0);
+      svg.getBoundingClientRect();
+      svg.querySelectorAll(".ln").forEach(p => { p.style.transition = "stroke-dashoffset 1.2s cubic-bezier(.25,.8,.3,1)"; p.style.strokeDashoffset = 0; });
+      svg.querySelectorAll(".end").forEach(c => { c.style.transition = "opacity .4s ease 1s"; c.style.opacity = 1; });
+      S._chAnim = { ...S._chAnim, [key]: 1 };
+    }
+    const hide = () => { tip.hidden = true; cx.setAttribute("visibility", "hidden"); svg.querySelectorAll(".hv").forEach(c => c.setAttribute("visibility", "hidden")); svg.classList.remove("hov"); };
     const show = ev => {
-      const r = svg.getBoundingClientRect(), W = +svg.getAttribute("width"), px = (ev.clientX - r.left) * W / r.width;
-      const L = 40, w = W - 40 - 14, i = Math.max(0, Math.min(days.length - 1, Math.round((px - L) / (w || 1) * (days.length - 1))));
-      const X = days.length === 1 ? L + w / 2 : L + i * w / (days.length - 1);
-      cx.setAttribute("x1", X); cx.setAttribute("x2", X); cx.setAttribute("visibility", "visible");
-      const rows = series.map(s => ({ z: s.z, v: s.vals[i] })).sort((a, b) => b.v - a.v);
-      tip.innerHTML = `<b>${plDay(days[i])}</b>` + rows.map(o => `<div><i style="background:${zColor(o.z)}"></i>${o.z}<span>${frac(o.v)}</span></div>`).join("");
-      tip.hidden = false; const tx = X * r.width / W; tip.style.left = Math.min(Math.max(0, tx + 12), r.width - tip.offsetWidth) + "px";
-      if (tx + 12 + tip.offsetWidth > r.width) tip.style.left = Math.max(0, tx - 12 - tip.offsetWidth) + "px";
+      const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width;
+      let k = 0; cp.pts.forEach((p, i) => { if (Math.abs(g.x(p.off) - px) < Math.abs(g.x(cp.pts[k].off) - px)) k = i; });
+      const p = cp.pts[k], X = g.x(p.off);
+      cx.setAttribute("x1", X); cx.setAttribute("x2", X); cx.setAttribute("visibility", "visible"); svg.classList.add("hov");
+      svg.querySelectorAll(".hv").forEach(c => { c.setAttribute("cx", X); c.setAttribute("cy", g.y(p.v[+c.dataset.hv])); c.setAttribute("visibility", "visible"); });
+      const rows = cp.series.map((s, i) => ({ z: s.z, v: p.v[i] })).sort((a, b) => b.v - a.v);
+      tip.innerHTML = `<b>${p.d ? (p.d === cp.days.at(-1) && p.d === today() ? "Dziś, " : "Do ") + plDay(p.d) : "Początek kwartału"}</b>`
+        + rows.map(o => `<div><i style="background:${zColor(o.z)}"></i>${o.z}<span>${frac(o.v)}</span></div>`).join("");
+      tip.hidden = false; const tx = X * r.width / W;
+      let left = tx + 14; if (left + tip.offsetWidth > r.width) left = tx - 14 - tip.offsetWidth; tip.style.left = Math.max(0, left) + "px";
     };
     hit.addEventListener("pointermove", show); hit.addEventListener("pointerdown", show);
-    hit.addEventListener("pointerleave", () => { tip.hidden = true; cx.setAttribute("visibility", "hidden"); });
+    hit.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") hide(); });
+    S._chHide = hide;
   };
-  draw(); clearTimeout(S._rz); window.onresize = () => { clearTimeout(S._rz); S._rz = setTimeout(() => { if (S.view?.kind === "chart") draw(); }, 200); };
+  draw(); S._chDraw = draw;
+  if (!S._chInit) { S._chInit = 1;
+    window.addEventListener("resize", () => { clearTimeout(S._rz); S._rz = setTimeout(() => { if ($("#chsvgbox")) S._chDraw?.(); }, 200); });
+    document.addEventListener("pointerdown", e => { if (!e.target.closest?.("#chwrap")) S._chHide?.(); }); }
 }
 
 // ---------- ARCHIWUM KWARTAŁÓW (kadra): zapis wyników po zakończeniu kwartału + eksport
